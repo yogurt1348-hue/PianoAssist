@@ -7,6 +7,7 @@
 #include "Adaptive/ReferencePerformance.h"
 #include "Adaptive/TempoMap.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -77,6 +78,28 @@ inline std::vector<Step> syntheticPiece(int count, int ppq = 480, bool withChord
         if (withChords && i % 4 == 0) s.pitches = { m - 12, m - 8, m - 5, m };   // chord on the downbeat
         else s.pitches = { m };
         steps.push_back(s);
+    }
+    return steps;
+}
+
+// A non-repeating synthetic piece (seeded random walk with occasional chords),
+// so every passage occurs once: needed to test global re-acquisition.
+inline std::vector<Step> randomPiece(int count, std::uint32_t seed = 2024, int ppq = 480)
+{
+    Lcg rng;
+    rng.state = seed;
+    std::vector<Step> steps;
+    int pitch = 64;
+    std::int64_t tick = 0;
+    for (int i = 0; i < count; ++i) {
+        pitch += static_cast<int>(rng.next() % 9) - 4;
+        pitch = std::clamp(pitch, 52, 84);
+        Step s;
+        s.tick = tick;
+        if (rng.next() % 5 == 0) s.pitches = { pitch - 12, pitch - 5, pitch };
+        else s.pitches = { pitch };
+        steps.push_back(s);
+        tick += (rng.next() % 3 == 0) ? ppq / 2 : ppq;
     }
     return steps;
 }
