@@ -1,0 +1,138 @@
+Adaptive Follow diagnostic report
+==================================
+version: 0.1.0
+state: TRACKING
+reference: Example part (C:\Users\<you>\AppData\Roaming\AdaptiveFollow\references\Example part.json)
+data dir: C:\Users\<you>\AppData\Roaming\AdaptiveFollow
+config: {"reference_name": "", "midi_channel": 0, "min_velocity": 1, "chord_window_ms": null, "timing_tolerance_ms": 100.0, "tempo_min_bpm": 40.0, "tempo_max_bpm": 240.0, "speed_min": 0.5, "speed_max": 1.6, "transport_control": true, "tempo_control": false, "follow_strategy": "speed_only", "dry_run": false, "auto_arm": false, "start_on_first_note": true, "wait_behavior": "pause", "lost_behavior": "continue", "allow_seek": false, "seek_min_confidence": 0.75, "seek_threshold_beats": 2.0, "offset_mode": "fixed", "offset_ticks": 0, "phase_correction_time_s": 1.0, "max_phase_correction": 0.15, "catchup_max_correction": 0.35, "speed_slew_per_s": 0.8, "hold_tolerance_beats": 0.25, "pause_grace_s": 0.3, "tempo_smoothing_s": 2.0, "tempo_update_min_bpm": 0.5, "control_cc_arm_toggle": null, "control_cc_dry_run_toggle": null, "control_cc_reset": null, "log_level": "debug", "log_max_kb": 512, "hint_messages": true}
+disabled features: -
+status: state=TRACKING conf=1.00 performer_bpm=89.3 event=23/24 target_tick=1753 speed=0.889 tempo=100.00 (base 100.00) dry_run=False
+recent transitions:
+  0.000 IDLE -> ARMED (armed (controlling transport, strategy speed_only, no seek); base tempo 100.00 BPM, offset 0 ticks)
+  0.990 ARMED -> TRACKING (first matching note (event 0))
+  7.680 TRACKING -> WAITING (no note for 0.68 s after the expected event 13)
+  9.995 WAITING -> TRACKING (performer resumed)
+log level: debug, log file: C:\Users\<you>\AppData\Roaming\AdaptiveFollow\logs\adaptive_follow.log
+counts: debug=161, error=0, info=8, warning=0
+
+--- last 120 log lines ---
+2026-10-10 19:14:33 [DEBUG] t=6.017 note 65 vel 90 ch 1 -> advance event=11 (tick 720) conf=1.00 bpm=89.5 state=TRACKING
+2026-10-10 19:14:33 [STATUS] t=6.080 state=TRACKING conf=1.00 performer_bpm=89.5 event=11/24 target_tick=729 song_tick=731 ref_tick=731 speed=0.899 tempo=100.00 (base 100.00) phase_err=-2.0 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=6.120 speed 0.887 (rate cmd 0.887, phase error -1.2 ticks)
+2026-10-10 19:14:33 [DEBUG] t=6.240 speed 0.882 (rate cmd 0.882, phase error -2.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=6.328 note 66 vel 90 ch 1 -> advance event=12 (tick 768) conf=1.00 bpm=90.0 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=6.328 note 61 vel 90 ch 1 -> chord-note event=12 (tick 768) conf=1.00 bpm=90.0 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=6.328 note 54 vel 90 ch 1 -> chord-note event=12 (tick 768) conf=1.00 bpm=90.0 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=6.360 speed 0.916 (rate cmd 0.916, phase error 2.5 ticks)
+2026-10-10 19:14:33 [DEBUG] t=6.480 speed 0.911 (rate cmd 0.912, phase error 1.8 ticks)
+2026-10-10 19:14:33 [DEBUG] t=6.600 speed 0.907 (rate cmd 0.907, phase error 1.1 ticks)
+2026-10-10 19:14:33 [STATUS] t=6.600 state=TRACKING conf=1.00 performer_bpm=90.0 event=12/24 target_tick=807 song_tick=806 ref_tick=806 speed=0.907 tempo=100.00 (base 100.00) phase_err=1.1 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=6.720 speed 0.909 (rate cmd 0.909, phase error 1.4 ticks)
+2026-10-10 19:14:33 [DEBUG] t=6.840 speed 0.911 (rate cmd 0.911, phase error 1.7 ticks)
+2026-10-10 19:14:33 [DEBUG] t=6.960 speed 0.906 (rate cmd 0.906, phase error 1.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=7.080 speed 0.829 (rate cmd 0.812, phase error 1.2 ticks)
+2026-10-10 19:14:33 [DEBUG] t=7.100 speed 0.749 (rate cmd 0.625, phase error 1.1 ticks)
+2026-10-10 19:14:33 [DEBUG] t=7.120 speed 0.669 (rate cmd 0.500, phase error 2.0 ticks)
+2026-10-10 19:14:33 [STATUS] t=7.120 state=TRACKING conf=1.00 performer_bpm=90.0 event=12/24 target_tick=864 song_tick=880 ref_tick=880 speed=0.669 tempo=100.00 (base 100.00) phase_err=2.0 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=7.140 speed 0.589 (rate cmd 0.375, phase error 2.9 ticks)
+2026-10-10 19:14:33 [DEBUG] t=7.160 speed 0.509 (rate cmd 0.250, phase error 3.8 ticks)
+2026-10-10 19:14:33 [DEBUG] t=7.180 speed 0.429 (rate cmd 0.125, phase error 2.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=7.200 speed 0.349 (rate cmd 0.062, phase error 1.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=7.220 speed 0.269 (rate cmd 0.000, phase error 0.0 ticks)
+2026-10-10 19:14:33 [INFO] t=7.300 pause - performer is late; pausing at the next expected event
+2026-10-10 19:14:33 [DEBUG] t=7.340 speed 0.250 (rate cmd 0.000, phase error -4.0 ticks)
+2026-10-10 19:14:33 [STATUS] t=7.640 state=TRACKING conf=1.00 performer_bpm=90.0 event=12/24 target_tick=864 song_tick=892 ref_tick=892 speed=0.250 tempo=100.00 (base 100.00) phase_err=-4.0 dry_run=False
+2026-10-10 19:14:33 [INFO] t=7.680 state TRACKING -> WAITING: no note for 0.68 s after the expected event 13
+2026-10-10 19:14:33 [STATUS] t=8.160 state=WAITING conf=1.00 performer_bpm=90.0 event=12/24 target_tick=864 song_tick=892 ref_tick=892 speed=0.250 tempo=100.00 (base 100.00) phase_err=-4.0 dry_run=False
+2026-10-10 19:14:33 [STATUS] t=8.680 state=WAITING conf=1.00 performer_bpm=90.0 event=12/24 target_tick=864 song_tick=892 ref_tick=892 speed=0.250 tempo=100.00 (base 100.00) phase_err=-4.0 dry_run=False
+2026-10-10 19:14:33 [STATUS] t=9.200 state=WAITING conf=1.00 performer_bpm=90.0 event=12/24 target_tick=864 song_tick=892 ref_tick=892 speed=0.250 tempo=100.00 (base 100.00) phase_err=-4.0 dry_run=False
+2026-10-10 19:14:33 [STATUS] t=9.720 state=WAITING conf=1.00 performer_bpm=90.0 event=12/24 target_tick=864 song_tick=892 ref_tick=892 speed=0.250 tempo=100.00 (base 100.00) phase_err=-4.0 dry_run=False
+2026-10-10 19:14:33 [INFO] t=9.995 state WAITING -> TRACKING: performer resumed
+2026-10-10 19:14:33 [DEBUG] t=9.995 note 65 vel 90 ch 1 -> advance event=13 (tick 864) conf=0.51 bpm=90.0 state=TRACKING
+2026-10-10 19:14:33 [INFO] t=10.000 resume, speed=0.330 - performer continued
+2026-10-10 19:14:33 [DEBUG] t=10.020 speed 0.410 (rate cmd 0.853, phase error -25.4 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.040 speed 0.490 (rate cmd 0.856, phase error -23.5 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.060 speed 0.570 (rate cmd 0.858, phase error -22.6 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.080 speed 0.650 (rate cmd 0.859, phase error -21.7 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.100 speed 0.730 (rate cmd 0.861, phase error -20.9 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.120 speed 0.810 (rate cmd 0.863, phase error -20.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.200 speed 0.866 (rate cmd 0.866, phase error -18.5 ticks)
+2026-10-10 19:14:33 [STATUS] t=10.240 state=TRACKING conf=0.51 performer_bpm=90.0 event=13/24 target_tick=899 song_tick=918 ref_tick=918 speed=0.866 tempo=100.00 (base 100.00) phase_err=-18.7 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=10.320 speed 0.866 (rate cmd 0.866, phase error -18.2 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.440 speed 0.867 (rate cmd 0.867, phase error -17.9 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.560 speed 0.869 (rate cmd 0.869, phase error -16.6 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.620 speed 0.812 (rate cmd 0.812, phase error -17.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.640 speed 0.733 (rate cmd 0.688, phase error -16.1 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.660 speed 0.652 (rate cmd 0.500, phase error -16.2 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.670 note 69 vel 90 ch 1 -> advance event=14 (tick 960) conf=0.89 bpm=89.5 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=10.680 speed 0.733 (rate cmd 0.791, phase error -16.5 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.700 speed 0.797 (rate cmd 0.797, phase error -15.7 ticks)
+2026-10-10 19:14:33 [STATUS] t=10.760 state=TRACKING conf=0.89 performer_bpm=89.5 event=14/24 target_tick=973 song_tick=988 ref_tick=988 speed=0.797 tempo=100.00 (base 100.00) phase_err=-15.1 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=10.820 speed 0.810 (rate cmd 0.810, phase error -13.5 ticks)
+2026-10-10 19:14:33 [DEBUG] t=10.940 speed 0.818 (rate cmd 0.818, phase error -12.3 ticks)
+2026-10-10 19:14:33 [DEBUG] t=11.060 speed 0.825 (rate cmd 0.825, phase error -11.1 ticks)
+2026-10-10 19:14:33 [DEBUG] t=11.180 speed 0.839 (rate cmd 0.838, phase error -9.0 ticks)
+2026-10-10 19:14:33 [STATUS] t=11.280 state=TRACKING conf=0.89 performer_bpm=89.5 event=14/24 target_tick=1047 song_tick=1056 ref_tick=1056 speed=0.839 tempo=100.00 (base 100.00) phase_err=-8.7 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=11.300 speed 0.840 (rate cmd 0.840, phase error -8.8 ticks)
+2026-10-10 19:14:33 [DEBUG] t=11.321 note 73 vel 90 ch 1 -> advance event=15 (tick 1056) conf=0.93 bpm=90.1 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=11.420 speed 0.872 (rate cmd 0.872, phase error -4.7 ticks)
+2026-10-10 19:14:33 [DEBUG] t=11.540 speed 0.880 (rate cmd 0.880, phase error -3.4 ticks)
+2026-10-10 19:14:33 [DEBUG] t=11.658 note 57 vel 90 ch 1 -> advance event=16 (tick 1104) conf=0.95 bpm=90.3 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=11.658 note 64 vel 90 ch 1 -> chord-note event=16 (tick 1104) conf=0.96 bpm=90.3 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=11.658 note 69 vel 90 ch 1 -> chord-note event=16 (tick 1104) conf=0.97 bpm=90.3 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=11.660 speed 0.880 (rate cmd 0.880, phase error -3.7 ticks)
+2026-10-10 19:14:33 [DEBUG] t=11.780 speed 0.882 (rate cmd 0.882, phase error -3.4 ticks)
+2026-10-10 19:14:33 [STATUS] t=11.800 state=TRACKING conf=0.97 performer_bpm=90.3 event=16/24 target_tick=1124 song_tick=1128 ref_tick=1128 speed=0.882 tempo=100.00 (base 100.00) phase_err=-3.5 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=11.900 speed 0.884 (rate cmd 0.884, phase error -3.1 ticks)
+2026-10-10 19:14:33 [DEBUG] t=12.020 speed 0.886 (rate cmd 0.886, phase error -2.7 ticks)
+2026-10-10 19:14:33 [DEBUG] t=12.140 speed 0.889 (rate cmd 0.889, phase error -2.4 ticks)
+2026-10-10 19:14:33 [DEBUG] t=12.260 speed 0.891 (rate cmd 0.891, phase error -2.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=12.317 note 72 vel 90 ch 1 -> advance event=17 (tick 1200) conf=0.98 bpm=90.6 state=TRACKING
+2026-10-10 19:14:33 [STATUS] t=12.320 state=TRACKING conf=0.98 performer_bpm=90.6 event=17/24 target_tick=1200 song_tick=1202 ref_tick=1202 speed=0.891 tempo=100.00 (base 100.00) phase_err=-1.5 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=12.380 speed 0.901 (rate cmd 0.901, phase error -0.8 ticks)
+2026-10-10 19:14:33 [DEBUG] t=12.500 speed 0.897 (rate cmd 0.897, phase error -1.4 ticks)
+2026-10-10 19:14:33 [DEBUG] t=12.620 speed 0.900 (rate cmd 0.900, phase error -1.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=12.668 note 72 vel 90 ch 1 -> advance event=18 (tick 1248) conf=0.99 bpm=89.9 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=12.740 speed 0.877 (rate cmd 0.877, phase error -3.6 ticks)
+2026-10-10 19:14:33 [STATUS] t=12.840 state=TRACKING conf=0.99 performer_bpm=89.9 event=18/24 target_tick=1273 song_tick=1276 ref_tick=1276 speed=0.877 tempo=100.00 (base 100.00) phase_err=-3.3 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=12.860 speed 0.878 (rate cmd 0.878, phase error -3.4 ticks)
+2026-10-10 19:14:33 [DEBUG] t=12.980 speed 0.880 (rate cmd 0.880, phase error -3.1 ticks)
+2026-10-10 19:14:33 [DEBUG] t=13.100 speed 0.882 (rate cmd 0.882, phase error -2.8 ticks)
+2026-10-10 19:14:33 [DEBUG] t=13.220 speed 0.883 (rate cmd 0.883, phase error -2.6 ticks)
+2026-10-10 19:14:33 [DEBUG] t=13.333 note 68 vel 90 ch 1 -> advance event=19 (tick 1344) conf=0.99 bpm=89.6 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=13.340 speed 0.884 (rate cmd 0.884, phase error -1.9 ticks)
+2026-10-10 19:14:33 [STATUS] t=13.360 state=TRACKING conf=0.99 performer_bpm=89.6 event=19/24 target_tick=1348 song_tick=1349 ref_tick=1349 speed=0.884 tempo=100.00 (base 100.00) phase_err=-1.1 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=13.460 speed 0.885 (rate cmd 0.885, phase error -1.7 ticks)
+2026-10-10 19:14:33 [DEBUG] t=13.580 speed 0.887 (rate cmd 0.887, phase error -1.5 ticks)
+2026-10-10 19:14:33 [DEBUG] t=13.700 speed 0.888 (rate cmd 0.888, phase error -1.3 ticks)
+2026-10-10 19:14:33 [DEBUG] t=13.820 speed 0.889 (rate cmd 0.889, phase error -1.1 ticks)
+2026-10-10 19:14:33 [STATUS] t=13.880 state=TRACKING conf=0.99 performer_bpm=89.6 event=19/24 target_tick=1422 song_tick=1423 ref_tick=1423 speed=0.889 tempo=100.00 (base 100.00) phase_err=-0.5 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=13.940 speed 0.891 (rate cmd 0.891, phase error -0.9 ticks)
+2026-10-10 19:14:33 [DEBUG] t=13.981 note 70 vel 90 ch 1 -> advance event=20 (tick 1440) conf=0.99 bpm=90.2 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=13.981 note 65 vel 90 ch 1 -> chord-note event=20 (tick 1440) conf=1.00 bpm=90.2 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=13.981 note 58 vel 90 ch 1 -> chord-note event=20 (tick 1440) conf=1.00 bpm=90.2 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=14.060 speed 0.917 (rate cmd 0.917, phase error 2.4 ticks)
+2026-10-10 19:14:33 [DEBUG] t=14.180 speed 0.919 (rate cmd 0.919, phase error 2.7 ticks)
+2026-10-10 19:14:33 [DEBUG] t=14.300 speed 0.914 (rate cmd 0.914, phase error 2.0 ticks)
+2026-10-10 19:14:33 [STATUS] t=14.400 state=TRACKING conf=1.00 performer_bpm=90.2 event=20/24 target_tick=1500 song_tick=1499 ref_tick=1499 speed=0.914 tempo=100.00 (base 100.00) phase_err=1.4 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=14.420 speed 0.910 (rate cmd 0.910, phase error 1.3 ticks)
+2026-10-10 19:14:33 [DEBUG] t=14.540 speed 0.912 (rate cmd 0.912, phase error 1.6 ticks)
+2026-10-10 19:14:33 [DEBUG] t=14.660 speed 0.908 (rate cmd 0.908, phase error 1.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=14.674 note 74 vel 90 ch 1 -> advance event=21 (tick 1536) conf=1.00 bpm=89.9 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=14.780 speed 0.882 (rate cmd 0.882, phase error -2.7 ticks)
+2026-10-10 19:14:33 [DEBUG] t=14.900 speed 0.884 (rate cmd 0.884, phase error -2.5 ticks)
+2026-10-10 19:14:33 [STATUS] t=14.920 state=TRACKING conf=1.00 performer_bpm=89.9 event=21/24 target_tick=1571 song_tick=1574 ref_tick=1574 speed=0.884 tempo=100.00 (base 100.00) phase_err=-2.6 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=15.020 speed 0.885 (rate cmd 0.885, phase error -2.2 ticks)
+2026-10-10 19:14:33 [DEBUG] t=15.140 speed 0.887 (rate cmd 0.887, phase error -2.0 ticks)
+2026-10-10 19:14:33 [DEBUG] t=15.260 speed 0.888 (rate cmd 0.888, phase error -1.7 ticks)
+2026-10-10 19:14:33 [DEBUG] t=15.341 note 70 vel 90 ch 1 -> advance event=22 (tick 1632) conf=1.00 bpm=89.5 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=15.380 speed 0.886 (rate cmd 0.886, phase error -1.4 ticks)
+2026-10-10 19:14:33 [STATUS] t=15.440 state=TRACKING conf=1.00 performer_bpm=89.5 event=22/24 target_tick=1646 song_tick=1648 ref_tick=1648 speed=0.886 tempo=100.00 (base 100.00) phase_err=-1.8 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=15.500 speed 0.887 (rate cmd 0.887, phase error -1.2 ticks)
+2026-10-10 19:14:33 [DEBUG] t=15.620 speed 0.888 (rate cmd 0.888, phase error -1.1 ticks)
+2026-10-10 19:14:33 [DEBUG] t=15.671 note 66 vel 90 ch 1 -> advance event=23 (tick 1680) conf=1.00 bpm=89.3 state=TRACKING
+2026-10-10 19:14:33 [DEBUG] t=15.740 speed 0.893 (rate cmd 0.893, phase error -0.1 ticks)
+2026-10-10 19:14:33 [DEBUG] t=15.860 speed 0.894 (rate cmd 0.894, phase error 0.1 ticks)
+2026-10-10 19:14:33 [STATUS] t=15.960 state=TRACKING conf=1.00 performer_bpm=89.3 event=23/24 target_tick=1721 song_tick=1722 ref_tick=1722 speed=0.894 tempo=100.00 (base 100.00) phase_err=-0.7 dry_run=False
+2026-10-10 19:14:33 [DEBUG] t=15.980 speed 0.895 (rate cmd 0.895, phase error 0.2 ticks)
+2026-10-10 19:14:33 [DEBUG] t=16.100 speed 0.889 (rate cmd 0.889, phase error -0.6 ticks)

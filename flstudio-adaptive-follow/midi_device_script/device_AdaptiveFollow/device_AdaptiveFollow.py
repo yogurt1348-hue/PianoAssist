@@ -1,0 +1,298 @@
+# name=AdaptiveFollow
+"""
+Adaptive Follow - FL Studio MIDI device script (MVP).
+
+Assign this script ("AdaptiveFollow") to your MIDI keyboard's input in
+FL Studio's MIDI settings. Your notes keep playing the selected instrument
+exactly as before (this script never marks notes as handled); in parallel
+they are compared with the exported reference part and FL Studio's transport
+follows you.
+
+Official MIDI Controller Scripting API used (FL Studio API stubs, IL-Group):
+  callbacks : OnInit, OnDeInit, OnMidiMsg, OnIdle, OnProjectLoad
+  transport : isPlaying, start (play/pause), getSongPos(SONGLENGTH_ABSTICKS),
+              setSongPos(ticks, SONGLENGTH_ABSTICKS) [API >= 4], setPlaybackSpeed
+  mixer     : getCurrentTempo
+  general   : getVersion, getRecPPQ [API >= 8],
+              processRECEvent(REC_Tempo, bpm*1000, REC_Control|REC_UpdateControl)
+  ui        : setHintMsg
+Every call is wrapped; unavailable features are disabled with a log message.
+
+Console commands (View > Script output, select this device, type):
+  af_help()  af_status()  af_arm()  af_disarm()  af_toggle()
+  af_dry_run(True/False)  af_reload()  af_report()  af_set("key", value)
+"""
+
+import general
+import midi
+import mixer
+import transport
+import ui
+
+_state = {"session": None, "storage": None, "error": "", "next_poll": 0.0}  # type: dict
+
+
+# ------------------------------------------------------------------ bootstrap
+
+def _bootstrap():
+    """Make the shared ``adaptive_follow`` package importable; return the data folder."""
+    import sys
+    lib = ""
+    data = ""
+    try:
+        import adaptive_follow_paths as paths    # written by the installer next to this file
+        lib = paths.LIB_DIR
+        data = paths.DATA_DIR
+    except Exception:
+        try:
+            import os
+            appdata = os.environ.get("APPDATA", "")
+            if appdata:
+                lib = os.path.join(appdata, "AdaptiveFollow", "lib")
+                data = os.path.join(appdata, "AdaptiveFollow")
+        except Exception:
+            pass
+    if lib and lib not in sys.path:
+        sys.path.insert(0, lib)
+    return data
+
+
+def _api_version():
+    try:
+        return int(general.getVersion())
+    except Exception:
+        return 0
+
+
+class FLTransportPort(object):
+    """Adaptive Follow transport port implemented with the official FL Studio API."""
+
+    def __init__(self, reference_ppq_fallback=96):
+        self.api = _api_version()
+        self.fallback_ppq = reference_ppq_fallback
+
+    def is_playing(self):
+        return bool(transport.isPlaying())
+
+    def song_tick(self):
+        return int(transport.getSongPos(2))      # 2 == midi.SONGLENGTH_ABSTICKS (absolute ticks)
+
+    def project_ppq(self):
+        if self.api >= 8:
+            return int(general.getRecPPQ())
+        return self.fallback_ppq        # older FL: the Piano Roll PPQ is the project PPQ
+
+    def tempo(self):
+        value = float(mixer.getCurrentTempo())
+        # Some versions report tempo * 1000 (the REC_Tempo unit); normalise.
+        if value > 1000.0:
+            value = value / 1000.0
+        return value
+
+    def play_pause(self):
+        transport.start()               # documented as play/pause
+
+    def set_speed(self, multiplier):
+        transport.setPlaybackSpeed(float(multiplier))
+
+    def can_set_tempo(self):
+        return hasattr(general, "processRECEvent") and hasattr(midi, "REC_Tempo")
+
+    def set_tempo(self, bpm):
+        general.processRECEvent(midi.REC_Tempo, int(round(float(bpm) * 1000)),
+                                midi.REC_Control | midi.REC_UpdateControl)
+
+    def can_seek(self):
+        return self.api >= 4            # setSongPos(position, mode) since API 4
+
+    def set_song_tick(self, ticks):
+        transport.setSongPos(int(ticks), 2)      # 2 == midi.SONGLENGTH_ABSTICKS, API >= 4
+
+    def hint(self, text):
+        ui.setHintMsg(text)
+
+
+def _start():
+    data_dir = _bootstrap()
+    try:
+        from adaptive_follow import __version__
+        from adaptive_follow.diagnostics import Diagnostics
+        from adaptive_follow.session import AdaptiveFollowSession
+        from adaptive_follow.storage import Storage
+    except Exception as exc:
+        _state["error"] = "cannot import the shared adaptive_follow module (%r); re-run the installer" % (exc,)
+        print("Adaptive Follow ERROR: " + _state["error"])
+        return
+    storage = Storage(data_dir or None)
+    storage.ensure_dirs()
+    config = storage.load_config()
+    diag = Diagnostics(storage.log_path, config.log_level, config.log_max_kb,
+                       echo=print if config.log_level == "debug" else None)
+    port = FLTransportPort()
+    session = AdaptiveFollowSession(port, storage, diag, config)
+    session.load_config()
+    diag.info("Adaptive Follow %s started (MIDI scripting API %d, data %s)" % (__version__, port.api, storage.data_dir))
+    if port.api < 4:
+        diag.warning("API < 4: setSongPos(ticks) unavailable; seeking disabled")
+    if port.api < 8:
+        diag.warning("API < 8: general.getRecPPQ unavailable; the reference PPQ is assumed to be the project PPQ")
+    if session.load_reference():
+        port.fallback_ppq = session.reference.ppq
+    _state["session"] = session
+    _state["storage"] = storage
+    print("Adaptive Follow %s ready. Reference: %s. Dry-run: %s. Type af_help() for commands."
+          % (__version__, session.reference.name if session.reference else "NONE (export one first)",
+             config.dry_run))
+    if config.auto_arm and session.reference is not None:
+        session.arm()
+
+
+# ------------------------------------------------------------------ callbacks
+
+def OnInit():
+    try:
+        _start()
+    except Exception as exc:
+        _state["error"] = repr(exc)
+        print("Adaptive Follow failed to start: %r" % (exc,))
+
+
+def OnDeInit():
+    session = _state.get("session")
+    if session is not None:
+        try:
+            session.shutdown()          # restores speed 1.0 / original tempo
+        except Exception as exc:
+            print("Adaptive Follow shutdown error: %r" % (exc,))
+
+
+def OnProjectLoad(status):
+    # A different project is being loaded: stop following, keep FL Studio normal.
+    session = _state.get("session")
+    if session is not None and status == getattr(midi, "PL_Start", 0):
+        try:
+            session.disarm("project load")
+        except Exception:
+            pass
+
+
+def OnMidiMsg(msg):
+    session = _state.get("session")
+    if session is None:
+        return
+    try:
+        status = msg.status & 0xF0
+        channel = (msg.status & 0x0F) + 1
+        if status == midi.MIDI_NOTEON:
+            session.on_note(msg.data1, msg.data2, channel, msg.data2 > 0)
+        elif status == midi.MIDI_NOTEOFF:
+            session.on_note(msg.data1, 0, channel, False)
+        elif status == midi.MIDI_CONTROLCHANGE:
+            if session.on_cc(msg.data1, msg.data2, channel):
+                msg.handled = True      # only explicitly configured control CCs are consumed
+    except Exception as exc:
+        try:
+            session.diag.error("OnMidiMsg error: %r" % (exc,))
+        except Exception:
+            pass
+    # Notes are never marked handled: FL Studio plays them as usual.
+
+
+def OnIdle():
+    session = _state.get("session")
+    if session is None:
+        return
+    try:
+        session.tick()
+        now = session.clock()
+        if now >= _state["next_poll"]:
+            _state["next_poll"] = now + 0.5
+            cmd = _state["storage"].take_command()
+            if cmd:
+                session.diag.info("command file: %s" % cmd)
+                result = session.command(cmd)
+                if result:
+                    session.diag.info("command result: %s" % result)
+            session.maybe_reload_config()
+    except Exception as exc:
+        try:
+            session.diag.error("OnIdle error: %r" % (exc,))
+        except Exception:
+            pass
+
+
+# ------------------------------------------------------------------ console helpers
+
+def _s():
+    session = _state.get("session")
+    if session is None:
+        print("Adaptive Follow is not running: %s" % (_state.get("error") or "unknown error"))
+    return session
+
+
+def af_help():
+    print(__doc__)
+
+
+def af_status():
+    s = _s()
+    if s:
+        print(s.status_line())
+
+
+def af_arm():
+    s = _s()
+    if s:
+        print("armed" if s.arm() else "arm failed (see af_report())")
+
+
+def af_disarm():
+    s = _s()
+    if s:
+        s.disarm("disarmed from console")
+        print("disarmed; normal playback restored")
+
+
+def af_toggle():
+    s = _s()
+    if s:
+        s.toggle_arm()
+        print(s.sm.state)
+
+
+def af_dry_run(on=True):
+    s = _s()
+    if s:
+        s.set_dry_run(bool(on))
+        print("dry-run %s" % ("on" if on else "off"))
+
+
+def af_reload():
+    s = _s()
+    if s:
+        s.command("reload")
+        print("reference: %s" % (s.reference.name if s.reference else "NONE"))
+
+
+def af_report():
+    s = _s()
+    if s:
+        print("report written to %s" % s.write_report())
+
+
+def af_set(key, value):
+    """Change one setting (saved to config.json). Allowed only while disarmed."""
+    s = _s()
+    if not s:
+        return
+    if s.sm.active:
+        print("disarm first (af_disarm())")
+        return
+    try:
+        cfg = s.config.copy()
+        setattr(cfg, key, value)
+        s.storage.save_config(cfg)
+        s.load_config()
+        print("%s = %r" % (key, getattr(s.config, key)))
+    except Exception as exc:
+        print("cannot set %s: %s" % (key, exc))
