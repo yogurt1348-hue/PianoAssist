@@ -81,6 +81,7 @@ add_library(cadenza_core STATIC
     Source/Adaptive/AdaptiveTransport.cpp
     Source/Adaptive/BackingSequence.cpp
     Source/Adaptive/AdaptiveSong.cpp
+    Source/Adaptive/AdaptiveSongSession.cpp
 )
 
 target_include_directories(cadenza_core
@@ -139,6 +140,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_adaptive_follower_tests tests/AdaptiveScoreFollowerTests.cpp)
     cadenza_add_test(cadenza_adaptive_transport_tests tests/AdaptiveTransportTests.cpp)
     cadenza_add_test(cadenza_adaptive_backing_tests tests/AdaptiveBackingTests.cpp)
+    cadenza_add_test(cadenza_adaptive_session_tests tests/AdaptiveSessionTests.cpp)
 endif()
 
 # ============================================================
