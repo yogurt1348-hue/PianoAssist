@@ -10,7 +10,7 @@ The algorithms are adapted from the Cadenza project's C++ Adaptive Song Mode
 (``Source/Adaptive``); Cadenza itself is not modified or required.
 """
 
-__version__ = "0.1.4"
+__version__ = "0.2.0"
 
 from .model import Config  # noqa: F401
 from .reference import Reference, ReferenceFormatError, build_reference_from_notes  # noqa: F401

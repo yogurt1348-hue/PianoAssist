@@ -141,6 +141,32 @@ def test_loss_and_reacquisition():
     assert f.position == ref.event_count - 1 and f.state == sf.F_TRACKING
 
 
+def test_reacquisition_stays_near_the_playhead():
+    """Without seeking FL cannot jump, so a lost performer is looked for only near FL's
+    playhead: with a repeated passage the copy next to the playhead must win."""
+    phrase = [60, 64, 67, 72, 71, 67, 64, 62, 65, 69, 72, 74]
+    filler = [48 + (i * 5) % 11 for i in range(40)]
+    ref = melody(phrase + filler + phrase + filler)          # the phrase at events 0.. and 52..
+    second = len(phrase) + len(filler)
+    spt = 60.0 / (BPM * ref.ppq)
+    for centre, expect_from in ((ref.events[second + 3].tick, second), (ref.events[3].tick, 0)):
+        f = make(ref, start_event=len(phrase))
+        f.search_radius_ticks = 8 * ref.ppq
+        f.search_center_tick = centre
+        t = 0.0
+        for i in range(6):                                   # track a few filler notes first
+            t = i * 96 * spt
+            f.on_note_on(filler[i], t)
+        assert f.state == sf.F_TRACKING
+        for k in range(10):                                  # lost: pitches not in the part
+            t += 0.25
+            f.on_note_on(20 + k % 4, t)
+        assert f.state == sf.F_LOST
+        for i, p in enumerate(phrase[:8]):
+            r = f.on_note_on(p, t + 0.5 + i * 96 * spt)
+        assert expect_from <= f.position < expect_from + len(phrase), (centre, f.position)
+
+
 def test_start_anywhere():
     ref = synthetic_reference(60, seed=13)
     notes = [n for n in perform(ref, BPM) if n.true_event >= 30]

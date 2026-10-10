@@ -16,13 +16,16 @@ Official MIDI Controller Scripting API used (FL Studio API stubs, IL-Group):
   general   : getVersion, getRecPPQ [API >= 8],
               processRECEvent(REC_Tempo, bpm*1000, REC_Control|REC_UpdateControl)
   ui        : setHintMsg
+  device    : getPortNumber, isAssigned (diagnostics only)
 Every call is wrapped; unavailable features are disabled with a log message.
 
 Console commands (View > Script output, select this device, type):
   af_help()  af_status()  af_arm()  af_disarm()  af_toggle()
   af_dry_run(True/False)  af_reload()  af_report()  af_set("key", value)  af_probe()
+  af_profile("stable" | "responsive")
 """
 
+import device
 import general
 import midi
 import mixer
@@ -238,7 +241,7 @@ def _drive(session, source):
     """Run one control step (speed/tempo/pause). Called from OnIdle and, in case FL Studio
     calls OnIdle rarely or not at all, also from OnMidiMsg and OnUpdateBeatIndicator."""
     now = session.clock()
-    if now - _state["last_step"] < 0.01:
+    if now - _state["last_step"] < 1.0 / max(1.0, session.config.control_rate_hz):
         return
     _state["last_step"] = now
     _state["steps"] += 1
@@ -330,6 +333,15 @@ def af_status():
         print("OnIdle calls: %d; control steps: %d %s; last step %s; playing=%s"
               % (_state["idle_calls"], _state["steps"], _state["step_sources"] or "",
                  ("%.2f s ago" % ago) if ago >= 0 else "never", s._safe(s.port.is_playing, "?")))
+        try:
+            print("MIDI port %s; linked output (device.isAssigned): %s"
+                  % (device.getPortNumber(), device.isAssigned()))
+        except Exception as exc:
+            print("device info unavailable: %r" % (exc,))
+        c = s.config
+        print("wait=%s speed %.2f-%.2f tolerance %.0f ms corr %.2f/%.2f lost after %d radius %.0f beats seek=%s"
+              % (c.wait_behavior, c.speed_min, c.speed_max, c.timing_tolerance_ms, c.max_phase_correction,
+                 c.catchup_max_correction, c.lost_after_misses, c.reacquire_radius_beats, c.allow_seek))
 
 
 def af_arm():
@@ -387,6 +399,28 @@ def af_probe():
         print("references found: %s" % (", ".join(probe.list_references()) or "none"))
     except Exception as exc:
         print("probe failed: %r (%s)" % (exc, _state.get("error") or ""))
+
+
+def af_profile(name="stable"):
+    """Apply a group of settings: "stable" (default, no auto-pause) or "responsive"."""
+    s = _s()
+    if not s:
+        return
+    from adaptive_follow.model import PROFILES
+    if name not in PROFILES:
+        print("unknown profile %r; choose: %s" % (name, ", ".join(sorted(PROFILES))))
+        return
+    if s.sm.active:
+        print("disarm first (af_disarm())")
+        return
+    cfg = s.config.copy()
+    for key, value in sorted(PROFILES[name].items()):
+        setattr(cfg, key, value)
+    if s.storage.save_config(cfg):
+        s.load_config()
+    else:
+        s.config = cfg
+    print("profile %r applied: %s" % (name, ", ".join("%s=%r" % kv for kv in sorted(PROFILES[name].items()))))
 
 
 def af_set(key, value):

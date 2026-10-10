@@ -23,7 +23,7 @@ whole part.
 
 import flpianoroll as flp
 
-EXPORTER_VERSION = "0.1.4"
+EXPORTER_VERSION = "0.2.0"
 COLOR_CHOICES = ["All notes"] + ["Only note color %d" % (i + 1) for i in range(16)]
 
 _last_message = [""]

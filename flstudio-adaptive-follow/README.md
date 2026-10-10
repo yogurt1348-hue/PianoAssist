@@ -27,7 +27,7 @@ Studio ускоряется, замедляется и ждёт вас.
 3. Перезапустите FL Studio. **OPTIONS > MIDI settings**: выберите вашу клавиатуру во
    входах (Input), включите **Enable**, в **Controller type** выберите **AdaptiveFollow**.
 4. Откройте **VIEW > Script output** — на вкладке AdaptiveFollow должно быть
-   `Adaptive Follow 0.1.4 ready. Reference: NONE (...). Dry-run: True.`
+   `Adaptive Follow 0.2.0 ready. Reference: NONE (...). Dry-run: True.`
 5. Сохраните партию, которую будете играть, как MIDI-файл: в **Piano Roll** этой партии —
    меню Piano Roll **File > Export as MIDI file** (например `part.mid`). Можно и весь
    проект: **FILE > Export > MIDI file** — тогда при конвертации выберите нужную дорожку.
@@ -61,6 +61,8 @@ Studio ускоряется, замедляется и ждёт вас.
   неверные ноты; после потери находит вас снова (глобальный поиск + подтверждение).
 * Стратегии: `speed_only` (по умолчанию, только `setPlaybackSpeed`), `tempo_only`
   и `hybrid` (меняют темп проекта **только** если включён `tempo_control`).
+* Профили: **stable** (по умолчанию: без автопаузы, скорость 0.75–1.6, мягкие поправки,
+  повторный захват только рядом с позицией FL) и **responsive** (`af_profile("responsive")`).
 * Безопасность: dry-run по умолчанию; без перемотки (`allow_seek=false`); скорость
   и темп ограничены и сглажены; LOST — плавный возврат к скорости 1.0; Stop/Disarm/
   выгрузка скрипта — восстановление скорости 1.0 и исходного темпа; ноты клавиатуры

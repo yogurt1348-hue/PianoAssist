@@ -1,6 +1,8 @@
 from adaptive_follow import adaptive_transport as at
 from adaptive_follow import state as st
-from adaptive_follow.model import Config
+from adaptive_follow.model import PROFILES, Config
+
+RESPONSIVE = PROFILES["responsive"]   # the auto-pause behaviour these tests check
 from adaptive_follow.score_follower import FollowerSnapshot
 
 PPQ = 96
@@ -77,7 +79,7 @@ def test_phase_correction_backing_behind_speeds_up():
 
 
 def test_far_behind_catches_up_faster_but_bounded():
-    cfg = Config.from_dict({})
+    cfg = Config.from_dict(RESPONSIVE)
     ctrl = at.TransportController(cfg, PPQ, BPM)
     plant = Plant(pos=0.0)
     rec = []
@@ -118,7 +120,7 @@ def test_slew_and_update_rate_limited():
 
 
 def test_waiting_pauses_at_hold_and_resumes():
-    cfg = Config.from_dict({})
+    cfg = Config.from_dict(RESPONSIVE)
     ctrl = at.TransportController(cfg, PPQ, BPM)
     plant = Plant(pos=0.0)
     hold = 2 * PPQ                         # next unplayed event at beat 2
@@ -140,7 +142,7 @@ def test_wait_slow_never_pauses():
     rec = []
     loop(ctrl, plant, snap(hold=PPQ), 3.0, state=st.WAITING, record=rec)
     assert plant.playing and all(r[1].action is None for r in rec)
-    assert plant.speed <= 0.5 + 1e-9
+    assert abs(plant.speed - ctrl.cfg.speed_min) < 1e-9          # brakes to speed_min, never below
 
 
 def test_lost_returns_speed_to_normal_and_keeps_playing():
@@ -203,7 +205,7 @@ def test_restore_returns_normal_playback():
 
 
 def test_armed_intro_waits_at_entry():
-    ctrl = at.TransportController(Config.from_dict({}), PPQ, BPM)
+    ctrl = at.TransportController(Config.from_dict(RESPONSIVE), PPQ, BPM)
     plant = Plant(pos=0.0, playing=True)
     s = snap(anchor_tick=4 * PPQ, hold=4 * PPQ, started=False)
     loop(ctrl, plant, s, 5.0, state=st.ARMED)

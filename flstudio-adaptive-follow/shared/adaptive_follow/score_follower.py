@@ -181,6 +181,8 @@ class ScoreFollower(object):
         self._history = []
         self._search_notes = 0
         self._reacquire_matches = 0
+        self.search_center_tick = None   # reference tick of FL's playhead (set by the session)
+        self.search_radius_ticks = 0     # > 0: re-acquire only within this distance of the centre
         self._seed_start(start)
 
     def seek_to_event(self, index):
@@ -474,6 +476,11 @@ class ScoreFollower(object):
         if len(notes) < cfg.reacquire_min_matches:
             return None
         candidates = self._pitch_index.get(notes[-1][0], [])
+        if self.search_radius_ticks > 0 and self.search_center_tick is not None:
+            # Without seeking FL Studio cannot jump: only look near its playhead.
+            lo = self.search_center_tick - self.search_radius_ticks
+            hi = self.search_center_tick + self.search_radius_ticks
+            candidates = [c for c in candidates if lo <= self._ev(c).tick <= hi]
         results = []
         for cand in candidates:
             r = self._align_back(cand, notes)

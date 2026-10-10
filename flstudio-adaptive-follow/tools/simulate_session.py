@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "shared"))
 
 from adaptive_follow import compat  # noqa: E402
 from adaptive_follow.diagnostics import Diagnostics  # noqa: E402
-from adaptive_follow.model import Config  # noqa: E402
+from adaptive_follow.model import PROFILES, Config  # noqa: E402
 from adaptive_follow.reference import Reference  # noqa: E402
 from adaptive_follow.session import AdaptiveFollowSession  # noqa: E402
 from adaptive_follow.simulation import (LiveNote, VirtualTransport, perform, performer_truth, rms,  # noqa: E402
@@ -84,10 +84,13 @@ def run(name, ref, args):
     data = tempfile.mkdtemp(prefix="af_sim_")
     storage = Storage(data)
     storage.save_reference(ref)
-    cfg = Config.from_dict({"dry_run": args.dry_run, "follow_strategy": args.strategy,
-                            "tempo_control": args.strategy != "speed_only", "allow_seek": args.allow_seek,
-                            "wait_behavior": args.wait_behavior,
-                            "log_level": args.log_level})
+    values = dict(PROFILES[args.profile])
+    values.update({"dry_run": args.dry_run, "follow_strategy": args.strategy,
+                   "tempo_control": args.strategy != "speed_only", "allow_seek": args.allow_seek,
+                   "log_level": args.log_level})
+    if args.wait_behavior:
+        values["wait_behavior"] = args.wait_behavior
+    cfg = Config.from_dict(values)
     tr = VirtualTransport(ppq=ref.ppq, tempo=args.bpm)
     diag = Diagnostics(storage.log_path, args.log_level, echo=print if args.log_level == "debug" else None)
     s = AdaptiveFollowSession(tr, storage, diag, cfg, clock=lambda: tr.now)
@@ -142,7 +145,9 @@ def main():
     ap.add_argument("--bpm", type=float, default=120.0, help="project tempo of the virtual FL Studio")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--allow-seek", action="store_true")
-    ap.add_argument("--wait-behavior", choices=["pause", "slow", "continue"], default="pause")
+    ap.add_argument("--profile", choices=sorted(PROFILES), default="stable")
+    ap.add_argument("--wait-behavior", choices=["pause", "slow", "continue"], default=None,
+                    help="override the profile's wait_behavior")
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--log-level", choices=["off", "error", "info", "debug"], default="info")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -152,8 +157,9 @@ def main():
         ref = Reference.from_json(compat.read_text(args.reference))
     else:
         ref = synthetic_reference(64, ppq=96, seed=11)
-    print("reference %r: %d notes, %d events, PPQ %d; strategy %s, wait %s%s%s" % (
-        ref.name, len(ref.notes), ref.event_count, ref.ppq, args.strategy, args.wait_behavior,
+    print("reference %r: %d notes, %d events, PPQ %d; profile %s, strategy %s, wait %s%s%s" % (
+        ref.name, len(ref.notes), ref.event_count, ref.ppq, args.profile, args.strategy,
+        args.wait_behavior or PROFILES[args.profile]["wait_behavior"],
         ", seek allowed" if args.allow_seek else "", ", DRY-RUN" if args.dry_run else ""))
     rows = [run(name, ref, args) for name in (SCENARIOS if args.scenario == "all" else [args.scenario])]
     print("\n%-9s %5s %7s %7s %7s %6s %6s %5s %5s  %s" % ("scenario", "notes", "match%", "rms_ms", "max_ms",

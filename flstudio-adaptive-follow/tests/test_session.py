@@ -37,7 +37,8 @@ def test_follows_slower_performer_and_starts_on_first_note(make_session):
 
 
 def test_pause_and_resume_with_waiting(make_session):
-    s, tr, ref = make_session({"dry_run": False})
+    from adaptive_follow.model import PROFILES
+    s, tr, ref = make_session(dict(PROFILES["responsive"], dry_run=False))
     notes = perform(ref, 120.0, pause_after_event=20, pause_s=4.0)
     trace = run_session(s, tr, notes, notes[-1].t)
     states = [t.new for t in trace.transitions]
@@ -142,9 +143,12 @@ def _fake_fl_modules(transport_state):
     general.getVersion = lambda: 37
     general.getRecPPQ = lambda: 96
     general.processRECEvent = lambda e, v, f: transport_state.update(tempo=v / 1000.0)
+    device = types.ModuleType("device")
+    device.getPortNumber = lambda: 0
+    device.isAssigned = lambda: False
     ui = types.ModuleType("ui")
     ui.setHintMsg = lambda m: transport_state.setdefault("hints", []).append(m)
-    return {"midi": midi, "transport": transport, "mixer": mixer, "general": general, "ui": ui}
+    return {"midi": midi, "transport": transport, "mixer": mixer, "general": general, "ui": ui, "device": device}
 
 
 class FakeMsg(object):
@@ -239,7 +243,7 @@ def test_device_script_explains_a_missing_shared_module(tmp_path):
     script = os.path.join(ROOT, "midi_device_script", "device_AdaptiveFollow", "device_AdaptiveFollow.py")
     code = r'''
 import sys, types, importlib.util
-for name in ("general", "midi", "mixer", "transport", "ui"):
+for name in ("general", "midi", "mixer", "transport", "ui", "device"):
     sys.modules[name] = types.ModuleType(name)
 spec = importlib.util.spec_from_file_location("device_AdaptiveFollow", sys.argv[1])
 dev = importlib.util.module_from_spec(spec)

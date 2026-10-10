@@ -83,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 ### 2. Script output, консоль и режим отладки
 
 * **VIEW > Script output** — окно вывода скриптов. Выберите вкладку **AdaptiveFollow**:
-  при запуске должна быть строка `Adaptive Follow 0.1.4 ready ...`. Сюда же выводятся
+  при запуске должна быть строка `Adaptive Follow 0.2.0 ready ...`. Сюда же выводятся
   ошибки Python.
 * В этом окне есть консоль: команды выполняются в контексте выбранного скрипта.
 
@@ -96,6 +96,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
   | `af_reload()` | перечитать настройки и референс (при выключенном слежении) |
   | `af_report()` | записать диагностический отчёт |
   | `af_set("midi_channel", 2)` | изменить настройку (сохраняется в config.json; если FL запрещает запись — действует до закрытия FL) |
+  | `af_profile("stable")` / `af_profile("responsive")` | набор настроек: stable (по умолчанию) — без автопаузы, мягкие поправки; responsive — плотнее следует и ставит паузу, когда вы остановились |
   | `af_probe()` | что разрешает ваш FL: запись/чтение файлов в каждой папке данных, какие референсы найдены |
 
 * Если консоль недоступна в вашей версии — те же команды из обычной командной строки:
@@ -186,12 +187,28 @@ FL Studio изолирует скрипты: Piano Roll script и MIDI device sc
   к issue/сообщению, укажите версию FL Studio (Help > About) и что вы ожидали.
   Отчёт содержит пути вашего профиля Windows — при желании замените имя пользователя.
 
+## Стабильность: что важно знать
+
+* **FL может не вызывать `OnIdle`** (так было в FL с API 40: `af_status()` → `OnIdle calls: 0`).
+  Тогда скрипт управляет транспортом только в моменты ваших нот (`control steps … OnMidiMsg`).
+  Это работает, но между нотами скорость не меняется. Попробуйте связать выход: в
+  **OPTIONS > MIDI settings** выберите вашу клавиатуру в списке **Output** и задайте ей тот же
+  номер **Port**, что и у входа; после **Reload script** проверьте в `af_status()`, что
+  `linked output (device.isAssigned): True` и `OnIdle calls` растёт. (Документация Image-Line
+  описывает связанный выход; зависит ли от него `OnIdle`, не документировано — проверьте.)
+* **Если вы остановились, а сопровождение продолжило играть** (профиль stable не ставит паузу),
+  оно уйдёт вперёд. Проще всего вступить там, где оно играет сейчас: повторный захват ищет вас
+  рядом с позицией FL. Если вернуться назад — сопровождение будет замедляться (не ниже
+  `speed_min`), пока не совпадёт с вами; 3 с расхождения при 0.75× догоняются примерно за 15–20 с.
+  Быстрее: `af_set("allow_seek", True)` (перемотка после уверенного захвата) или
+  `af_profile("responsive")` (пауза при остановке).
+
 ## Частые проблемы
 
 | Симптом | Что сделать |
 |---|---|
-| `cannot import the shared adaptive_follow module` | запустите установщик новой версии (0.1.4+) и нажмите **Reload script** в Script output. Быстрое ручное исправление: скопируйте папку `shared\adaptive_follow` из архива в `...\Settings\Hardware\AdaptiveFollow\` и в `...\Settings\Piano roll scripts\`. В сообщении об ошибке перечислено, где скрипт искал модуль |
-| `SystemError: <class '_io.FileIO'> returned NULL without setting an exception` | песочница FL запретила открыть файл. С 0.1.4 это не ошибка: скрипты пишут в первую разрешённую папку (MIDI-скрипт — `...\Hardware\AdaptiveFollow\data`), а если нельзя никуда — работают в памяти. Что разрешено — `af_probe()` |
+| `cannot import the shared adaptive_follow module` | запустите установщик новой версии (0.2.0+) и нажмите **Reload script** в Script output. Быстрое ручное исправление: скопируйте папку `shared\adaptive_follow` из архива в `...\Settings\Hardware\AdaptiveFollow\` и в `...\Settings\Piano roll scripts\`. В сообщении об ошибке перечислено, где скрипт искал модуль |
+| `SystemError: <class '_io.FileIO'> returned NULL without setting an exception` | песочница FL запретила открыть файл. С 0.2.0 это не ошибка: скрипты пишут в первую разрешённую папку (MIDI-скрипт — `...\Hardware\AdaptiveFollow\data`), а если нельзя никуда — работают в памяти. Что разрешено — `af_probe()` |
 | `Reference: NONE` | сделайте референс конвертером (раздел 3), затем `af_reload()` |
 | `reference file ... is corrupted` | экспортируйте заново; повреждённый файл не загружается, FL работает как обычно |
 | ноты не распознаются | `af_status()`; проверьте `midi_channel`, `min_velocity`, что играете ту же партию и октаву |

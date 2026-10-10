@@ -37,11 +37,11 @@ DEFAULTS = {
     "midi_channel": 0,               # 0 = any, 1..16 = only that channel
     "min_velocity": 1,               # ignore softer note-ons (1..127)
     "chord_window_ms": None,         # None = use the window stored in the reference
-    "timing_tolerance_ms": 100.0,    # absolute part of the timing tolerance
+    "timing_tolerance_ms": 180.0,    # absolute part of the timing tolerance
     # --- limits ---
     "tempo_min_bpm": 40.0,
     "tempo_max_bpm": 240.0,
-    "speed_min": 0.5,
+    "speed_min": 0.75,
     "speed_max": 1.6,
     # --- control ---
     "transport_control": True,       # False = never touch transport (like dry_run)
@@ -50,7 +50,7 @@ DEFAULTS = {
     "dry_run": True,                 # safe default: compute decisions, do not apply them
     "auto_arm": False,
     "start_on_first_note": True,     # start playback with the first confident match
-    "wait_behavior": WAIT_PAUSE,
+    "wait_behavior": WAIT_SLOW,        # "stable": never auto-pause (see PROFILES)
     "lost_behavior": LOST_CONTINUE,
     "allow_seek": False,             # setSongPos only after a confident re-acquisition
     "seek_min_confidence": 0.75,
@@ -59,11 +59,14 @@ DEFAULTS = {
     "offset_ticks": 0,
     # --- loop tuning ---
     "phase_correction_time_s": 1.0,
-    "max_phase_correction": 0.15,
-    "catchup_max_correction": 0.35,   # when the backing is > 0.25 s behind (missed note, after a pause)
+    "max_phase_correction": 0.08,
+    "catchup_max_correction": 0.15,   # when the backing is > 0.25 s behind (missed note, after a pause)
     "speed_slew_per_s": 0.8,
     "hold_tolerance_beats": 0.25,
-    "pause_grace_s": 0.3,             # wait_behavior=pause: brake first, pause only if this late
+    "pause_grace_s": 1.0,             # wait_behavior=pause: brake first, pause only if this late
+    "reacquire_radius_beats": 8.0,    # without seek: look for a lost performer only this close to FL's playhead (0 = anywhere)
+    "lost_after_misses": 8,           # consecutive unmatched notes before LOST
+    "control_rate_hz": 25.0,          # at most this many transport control steps per second
     "tempo_smoothing_s": 2.0,         # hybrid/tempo: time constant of tempo changes
     "tempo_update_min_bpm": 0.5,      # do not send tempo changes smaller than this
     # --- optional MIDI controls (None = disabled; any CC number 0..127) ---
@@ -74,6 +77,18 @@ DEFAULTS = {
     "log_level": "info",
     "log_max_kb": 512,
     "hint_messages": True,
+}
+
+# Named groups of settings (console: af_profile("stable") / af_profile("responsive")).
+PROFILES = {
+    # Default. No auto-pause, gentle corrections, tolerant timing, local re-acquisition.
+    "stable": {"wait_behavior": WAIT_SLOW, "speed_min": 0.75, "timing_tolerance_ms": 180.0,
+               "max_phase_correction": 0.08, "catchup_max_correction": 0.15, "pause_grace_s": 1.0,
+               "lost_after_misses": 8, "reacquire_radius_beats": 8.0},
+    # Follows closely and pauses at the next expected note when the performer stops.
+    "responsive": {"wait_behavior": WAIT_PAUSE, "speed_min": 0.5, "timing_tolerance_ms": 100.0,
+                   "max_phase_correction": 0.15, "catchup_max_correction": 0.35, "pause_grace_s": 0.3,
+                   "lost_after_misses": 5, "reacquire_radius_beats": 8.0},
 }
 
 _NUMERIC_RANGES = {
@@ -92,7 +107,10 @@ _NUMERIC_RANGES = {
     "catchup_max_correction": (0.0, 1.0, float),
     "speed_slew_per_s": (0.05, 10.0, float),
     "hold_tolerance_beats": (0.0, 4.0, float),
-    "pause_grace_s": (0.0, 5.0, float),
+    "pause_grace_s": (0.0, 10.0, float),
+    "reacquire_radius_beats": (0.0, 1000.0, float),
+    "lost_after_misses": (3, 50, int),
+    "control_rate_hz": (2.0, 100.0, float),
     "tempo_smoothing_s": (0.1, 30.0, float),
     "tempo_update_min_bpm": (0.05, 20.0, float),
     "log_max_kb": (16, 65536, int),

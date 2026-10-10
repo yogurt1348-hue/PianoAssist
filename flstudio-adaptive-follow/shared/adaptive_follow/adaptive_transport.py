@@ -72,6 +72,8 @@ class TransportController(object):
     SPEED_URGENT_DELTA = 0.05    # ...unless the change is large (braking, start)
     PAUSE_LOOKAHEAD_S = 0.03     # pause one idle period early: FL cannot go below 0.25x
     CATCHUP_ERROR_S = 0.25       # behind by more than this: catchup_max_correction applies
+    FAR_ERROR_S = 1.0            # off by more than this (either way): up to FAR_CORRECTION
+    FAR_CORRECTION = 0.25
     BRAKE_SLEW_PER_S = 4.0       # braking into a hold point may slow down faster than speed_slew_per_s
 
     def __init__(self, config, ppq, base_bpm):
@@ -103,7 +105,9 @@ class TransportController(object):
     def _clamp_speed(self, s, braking=False):
         # While braking into a hold point the floor is FL's own minimum (0.25x),
         # so the grace period before a pause overshoots as little as possible.
-        lo = model.FL_SPEED_MIN if braking else max(model.FL_SPEED_MIN, self.cfg.speed_min)
+        # (only when it will pause there; "slow" never goes below speed_min).
+        lo = model.FL_SPEED_MIN if (braking and self.cfg.wait_behavior == model.WAIT_PAUSE) \
+            else max(model.FL_SPEED_MIN, self.cfg.speed_min)
         hi = min(model.FL_SPEED_MAX, self.cfg.speed_max)
         return min(hi, max(lo, s))
 
@@ -175,10 +179,13 @@ class TransportController(object):
                 else:
                     gain = 0.0          # WAITING: no phase chasing
                 # Far behind (a missed note, after our own pause): catch up faster.
-                # Being ahead is always corrected gently.
+                # Small leads are corrected gently; a lead of more than a second (the
+                # performer stopped while the band kept playing) also needs a firmer slow-down.
                 limit_corr = cfg.max_phase_correction
                 if e_s > self.CATCHUP_ERROR_S:
                     limit_corr = max(limit_corr, cfg.catchup_max_correction)
+                if abs(e_s) > self.FAR_ERROR_S:
+                    limit_corr = max(limit_corr, cfg.catchup_max_correction, self.FAR_CORRECTION)
                 max_corr = limit_corr * rate
                 corr = gain * e_s / max(0.05, cfg.phase_correction_time_s)
                 corr = min(max_corr, max(-max_corr, corr))

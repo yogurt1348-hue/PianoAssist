@@ -33,7 +33,7 @@ from .diagnostics import Diagnostics
 from .reference import ReferenceFormatError
 from .storage import ReferenceMissingError, Storage
 
-VERSION = "0.1.4"
+VERSION = "0.2.0"
 
 
 class AdaptiveFollowSession(object):
@@ -138,14 +138,18 @@ class AdaptiveFollowSession(object):
             ref = ref.regrouped(ticks)
         spt = 60.0 / (self.base_bpm * ref.ppq)
         fcfg = sf.FollowerConfig(timing_tolerance_s=cfg.timing_tolerance_ms / 1000.0,
-                                 min_bpm=cfg.tempo_min_bpm, max_bpm=cfg.tempo_max_bpm)
+                                 min_bpm=cfg.tempo_min_bpm, max_bpm=cfg.tempo_max_bpm,
+                                 lost_after_misses=cfg.lost_after_misses)
         self.follower = sf.ScoreFollower(ref, spt, fcfg)
+        if not cfg.allow_seek:
+            self.follower.search_radius_ticks = int(cfg.reacquire_radius_beats * ref.ppq)
         self.controller = at.TransportController(cfg, ref.ppq, self.base_bpm)
         song_tick = self._safe(self.port.song_tick, 0) or 0
         if cfg.offset_mode == model.OFFSET_PLAYHEAD:
             self.offset_song_ticks = int(song_tick - ref.first_tick * self.project_ppq / float(ref.ppq))
         else:
             self.offset_song_ticks = int(cfg.offset_ticks)
+        self.follower.search_center_tick = (song_tick - self.offset_song_ticks) * ref.ppq / float(self.project_ppq)
         self._active_reference = ref
         self._pending_start = False
         self.last_note = None
@@ -267,14 +271,15 @@ class AdaptiveFollowSession(object):
         now = self.clock() if now is None else now
         if not self.sm.active or self.follower is None:
             return None
-        self.follower.update(now)
-        self._sync_state(now)
         cfg = self.config
         playing = bool(self._safe(self.port.is_playing, False))
         song_tick = self._safe(self.port.song_tick, None)
         if song_tick is None:
             return None
         ref_tick = (song_tick - self.offset_song_ticks) * self._active_reference.ppq / float(self.project_ppq)
+        self.follower.search_center_tick = ref_tick
+        self.follower.update(now)
+        self._sync_state(now)
 
         # The user stopped FL Studio while we were controlling it: end the session cleanly.
         if cfg.controls_transport and self.controller.started_playback and not playing \
