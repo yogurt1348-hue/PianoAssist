@@ -22,7 +22,7 @@
 | общий модуль `adaptive_follow` (для скриптов FL) | `...\Hardware\AdaptiveFollow\adaptive_follow\` и `...\Piano roll scripts\adaptive_follow\` — FL добавляет папку скрипта в путь поиска модулей |
 | пути установки (генерируется) | `adaptive_follow_paths.py` рядом с каждым из скриптов |
 | общий модуль `adaptive_follow` (для инструментов) | `%APPDATA%\AdaptiveFollow\lib\adaptive_follow\` |
-| референсы, настройки, логи, отчёты | `%APPDATA%\AdaptiveFollow\{references, config.json, logs, reports}` |
+| референсы, настройки, логи, отчёты | `...\Hardware\AdaptiveFollow\data\{references, config.json, logs, reports}` — сюда FL разрешает писать MIDI-скрипту; `%APPDATA%\AdaptiveFollow\...` — для инструментов и если FL разрешает |
 | резервные копии перезаписанных файлов | `%APPDATA%\AdaptiveFollow\backup\<дата-время>\` |
 | манифест установки | `%APPDATA%\AdaptiveFollow\install-manifest.json` |
 | venv для инструментов | `%LOCALAPPDATA%\AdaptiveFollow\venv` |
@@ -83,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 ### 2. Script output, консоль и режим отладки
 
 * **VIEW > Script output** — окно вывода скриптов. Выберите вкладку **AdaptiveFollow**:
-  при запуске должна быть строка `Adaptive Follow 0.1.2 ready ...`. Сюда же выводятся
+  при запуске должна быть строка `Adaptive Follow 0.1.3 ready ...`. Сюда же выводятся
   ошибки Python.
 * В этом окне есть консоль: команды выполняются в контексте выбранного скрипта.
 
@@ -96,7 +96,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
   | `af_reload()` | перечитать настройки и референс (при выключенном слежении) |
   | `af_report()` | записать диагностический отчёт |
   | `af_set("midi_channel", 2)` | изменить настройку (сохраняется в config.json; если FL запрещает запись — действует до закрытия FL) |
-  | `af_probe()` | что разрешает ваш FL: запись/чтение файлов в каждой папке данных, передача референса в памяти |
+  | `af_probe()` | что разрешает ваш FL: запись/чтение файлов в каждой папке данных, какие референсы найдены |
 
 * Если консоль недоступна в вашей версии — те же команды из обычной командной строки:
   `python tools\afctl.py status`, `... arm`, `... dry-run off`, `... report`, `... set follow_strategy hybrid`
@@ -106,7 +106,34 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 * **Перезагрузка скрипта** после обновления: перезапуск FL Studio либо повторный выбор
   Controller type (в новых версиях в Script output есть кнопка перезагрузки скрипта).
 
-### 3. Найти и запустить скрипт в Piano Roll
+### 3. Создать референс: MIDI-файл → конвертер (основной способ)
+
+FL Studio изолирует скрипты: Piano Roll script и MIDI device script работают в разных
+интерпретаторах Python, а `open()` разрешён MIDI-скрипту только в его папке
+`...\Settings\Hardware\AdaptiveFollow\data` (проверено в FL с MIDI scripting API 40).
+Поэтому референс делает внешний конвертер, который пишет прямо туда:
+
+1. Откройте партию в Piano Roll → меню Piano Roll **File > Export as MIDI file** →
+   сохраните, например, `part.mid`. (Или весь проект: **FILE > Export > MIDI file** —
+   тогда позиции нот совпадают с позициями в песне, а нужную дорожку выберите в конвертере.)
+2. Перетащите `part.mid` на `tools\midi_to_reference.bat` в папке, которую вы скачали.
+   Или в PowerShell:
+   ```powershell
+   & "$env:LOCALAPPDATA\AdaptiveFollow\venv\Scripts\python.exe" tools\midi_to_reference.py part.mid --name "Verse"
+   # дорожки файла:          ... midi_to_reference.py song.mid --list
+   # выбрать дорожку/канал:  ... midi_to_reference.py song.mid --track 3 --channel 1
+   # окно аккорда, velocity: ... --chord-window 6 --min-velocity 10
+   ```
+   Если в файле несколько дорожек с нотами, конвертер спросит номер (или `--track N`).
+3. Конвертер напишет `Reference 'Verse' written to ...\Hardware\AdaptiveFollow\data\references\Verse.json`.
+4. В FL: Script output → вкладка вашего MIDI-входа → `af_reload()` → должно быть
+   `reference 'Verse' loaded`. `af_status()` / `af_probe()` покажут подробности.
+
+Экспорт отдельного паттерна начинается с тика 0 паттерна: если паттерн стоит в плейлисте
+не с начала, поставьте курсор на его начало и используйте `af_set("offset_mode", "playhead")`
+(или `offset_ticks`).
+
+### 4. (Необязательно) Скрипт Piano Roll
 
 1. Откройте нужную партию в Piano Roll.
 2. **Снимите выделение (Ctrl+D)**: скрипты Piano Roll получают выделенные ноты, а если
@@ -117,8 +144,9 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 4. В диалоге: **Reference name**, **Notes** (All notes / Only note color 1–16),
    **Min velocity %**, **Chord window (ticks)** (ноты, начавшиеся в пределах окна,
    считаются одним аккордом), **Include muted notes** → **Accept**.
-5. Сообщение покажет число нот/событий, путь к файлу и предупреждения (дубликаты,
-   отфильтрованные ноты). Ноты в Piano Roll **не изменяются**.
+5. Если ваша версия FL разрешает этому скрипту запись, сообщение покажет путь к файлу.
+   Если нет (так в FL с API 40) — сообщение подскажет путь через MIDI-файл и конвертер.
+   Ноты в Piano Roll **не изменяются**.
 
 Скрипт не нашёлся в меню → проверьте, что файл лежит в
 `...\FL Studio\Settings\Piano roll scripts\`, и перезапустите FL.
@@ -162,9 +190,9 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 
 | Симптом | Что сделать |
 |---|---|
-| `cannot import the shared adaptive_follow module` | запустите установщик новой версии (0.1.2+) и нажмите **Reload script** в Script output. Быстрое ручное исправление: скопируйте папку `shared\adaptive_follow` из архива в `...\Settings\Hardware\AdaptiveFollow\` и в `...\Settings\Piano roll scripts\`. В сообщении об ошибке перечислено, где скрипт искал модуль |
-| `SystemError: <class '_io.FileIO'> returned NULL without setting an exception` | встроенный Python FL запретил открыть файл. С версии 0.1.2 это не ошибка: скрипты пробуют несколько папок (`%APPDATA%\AdaptiveFollow`, `...\Hardware\AdaptiveFollow\data`, `Документы\Image-Line\AdaptiveFollow`), а если запись запрещена везде — работают в памяти: экспорт из Piano Roll передаётся MIDI-скрипту напрямую, пока FL открыт. Что разрешено — покажет `af_probe()` |
-| `Reference: NONE` | экспортируйте референс из Piano Roll, затем `af_reload()` |
+| `cannot import the shared adaptive_follow module` | запустите установщик новой версии (0.1.3+) и нажмите **Reload script** в Script output. Быстрое ручное исправление: скопируйте папку `shared\adaptive_follow` из архива в `...\Settings\Hardware\AdaptiveFollow\` и в `...\Settings\Piano roll scripts\`. В сообщении об ошибке перечислено, где скрипт искал модуль |
+| `SystemError: <class '_io.FileIO'> returned NULL without setting an exception` | песочница FL запретила открыть файл. С 0.1.3 это не ошибка: скрипты пишут в первую разрешённую папку (MIDI-скрипт — `...\Hardware\AdaptiveFollow\data`), а если нельзя никуда — работают в памяти. Что разрешено — `af_probe()` |
+| `Reference: NONE` | сделайте референс конвертером (раздел 3), затем `af_reload()` |
 | `reference file ... is corrupted` | экспортируйте заново; повреждённый файл не загружается, FL работает как обычно |
 | ноты не распознаются | `af_status()`; проверьте `midi_channel`, `min_velocity`, что играете ту же партию и октаву |
 | FL «не двигается» | включён dry-run (по умолчанию) — `af_dry_run(False)`; или `transport_control: false` |

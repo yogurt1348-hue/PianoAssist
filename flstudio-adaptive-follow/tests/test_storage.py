@@ -13,7 +13,7 @@ from adaptive_follow.storage import ReferenceMissingError, Storage, default_data
 def test_missing_reference_has_helpful_message(storage):
     with pytest.raises(ReferenceMissingError) as exc:
         storage.load_reference()
-    assert "export one from the Piano Roll" in str(exc.value)
+    assert "midi_to_reference" in str(exc.value)
     with pytest.raises(ReferenceMissingError):
         storage.load_reference("does not exist")
 

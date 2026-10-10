@@ -173,6 +173,7 @@ if ($removeAllData) {
     foreach ($fl in @(Get-Prop $m "fl_settings")) {
         if (-not $fl) { continue }
         Remove-Tree (Join-Path (Join-Path (Join-Path $fl "Hardware") "AdaptiveFollow") "data") "data"
+        Remove-Tree (Join-Path (Join-Path $fl "Piano roll scripts") "Adaptive Follow data") "Adaptive Follow data"
         $imageLine = Split-Path -Parent (Split-Path -Parent $fl)
         if ($imageLine) { Remove-Tree (Join-Path $imageLine "AdaptiveFollow") "AdaptiveFollow" }
     }

@@ -154,21 +154,29 @@ def main():
             sys.path.pop(0)
     else:
         info("config.json not created yet (the device script creates it with defaults on first start)")
-    refs = os.path.join(data, "references")
-    names = sorted(n for n in os.listdir(refs) if n.endswith(".json")) if os.path.isdir(refs) else []
-    if not names:
-        info("no references yet: export one from the Piano Roll")
+    # The MIDI script can only read its own folder inside FL Studio's sandbox.
+    check(os.path.isdir(os.path.join(hw, "data")), "device data folder %s" % os.path.join(hw, "data"),
+          "re-run tools\\install_windows.ps1")
+    found = []
+    for refs in (os.path.join(hw, "data", "references"), os.path.join(data, "references")):
+        if os.path.isdir(refs):
+            found += [os.path.join(refs, n) for n in sorted(os.listdir(refs)) if n.endswith(".json")]
+    if not found:
+        info("no references yet: convert a MIDI export with tools\\midi_to_reference.bat")
     else:
         sys.path.insert(0, lib)
         try:
             from adaptive_follow.reference import Reference
-            for n in names:
+            for p in found:
                 try:
-                    with open(os.path.join(refs, n), encoding="utf-8-sig") as f:
+                    with open(p, encoding="utf-8-sig") as f:
                         ref = Reference.from_json(f.read())
-                    check(True, "reference %s: %d notes, %d events, PPQ %d" % (n, len(ref.notes), ref.event_count, ref.ppq))
+                    readable = os.path.normcase(p).startswith(os.path.normcase(hw))
+                    check(True, "reference %s: %d notes, %d events, PPQ %d%s" % (
+                        p, len(ref.notes), ref.event_count, ref.ppq,
+                        "" if readable else " (outside the device folder: FL may not let the MIDI script read it)"))
                 except Exception as exc:
-                    check(False, "reference %s loads (%s)" % (n, exc), "export it again from the Piano Roll")
+                    check(False, "reference %s loads (%s)" % (p, exc), "convert it again")
         finally:
             sys.path.pop(0)
     manifest = os.path.join(data, "install-manifest.json")

@@ -19,8 +19,9 @@ Layout::
 
 FL Studio's embedded Python may block ``open()`` in some folders. ``Storage.select``
 probes candidate folders and writes to the first one that works; reads look in
-all of them. When nothing is writable the scripts keep working in memory
-(see ``handoff``) and every write reports ``StorageUnavailableError``.
+all of them. When nothing is writable the device script keeps working in
+memory and every write reports ``StorageUnavailableError``; references then come
+from ``tools/midi_to_reference.py``, which runs outside FL Studio.
 """
 
 from . import compat
@@ -48,12 +49,22 @@ class StorageUnavailableError(IOError):
     """No folder can be written (e.g. FL Studio blocks file access)."""
 
 
+PIANO_ROLL_DATA = "Adaptive Follow data"
+
+
 def fl_settings_from_sys_path():
-    """FL Studio's ``...\\FL Studio\\Settings`` folder, derived from the script folders
-    FL Studio puts on ``sys.path`` (``Settings\\Hardware\\<script>``, ``Settings\\Piano roll scripts``)."""
+    """FL Studio's ``...\\FL Studio\\Settings`` folder, derived from the script folders FL
+    Studio puts on ``sys.path`` (``Settings\\Hardware\\AdaptiveFollow``, ``Settings\\Piano roll
+    scripts``) or from where this package was imported (a copy lives next to each script)."""
     import sys
-    for entry in sys.path:
-        e = str(entry).replace("/", "\\").rstrip("\\")
+    entries = [str(e) for e in sys.path]
+    try:
+        here = __file__.replace("/", "\\").rsplit("\\", 2)[0]     # folder containing adaptive_follow\\
+        entries.insert(0, here)
+    except Exception:
+        pass
+    for entry in entries:
+        e = entry.replace("/", "\\").rstrip("\\")
         low = e.lower()
         for tail in ("\\hardware\\adaptivefollow", "\\piano roll scripts"):
             if low.endswith(tail) and low[:-len(tail)].endswith("\\settings"):
@@ -63,20 +74,21 @@ def fl_settings_from_sys_path():
 
 def candidate_data_dirs(preferred="", fl_settings=""):
     """Folders the FL Studio scripts may use for their data, in priority order.
-    Both scripts compute the same list, so they agree on where references live."""
+
+    FL Studio sandboxes each script: the MIDI device script can read and write
+    its own folder (``Settings\\Hardware\\AdaptiveFollow\\data``, confirmed), so that
+    comes first; the Piano Roll script's own folder next. Both scripts compute the
+    same list; writes go to the first writable folder, reads search all of them."""
     out = []
-    for d in (preferred, default_data_dir()):
-        if d and d not in out:
-            out.append(d)
+    image_line = ""
     if fl_settings:
         norm = fl_settings.replace("/", "\\").rstrip("\\")
         image_line = norm.rsplit("\\", 2)[0] if norm.count("\\") >= 2 else ""   # ...\\Image-Line
-        for d in (compat.path_join(fl_settings, "Hardware", "AdaptiveFollow", "data"),
-                  compat.path_join(image_line, "AdaptiveFollow") if image_line else ""):
-            if not d:
-                continue
-            if d not in out:
-                out.append(d)
+        out.append(compat.path_join(fl_settings, "Hardware", "AdaptiveFollow", "data"))
+        out.append(compat.path_join(fl_settings, "Piano roll scripts", PIANO_ROLL_DATA))
+    for d in (preferred, default_data_dir(), compat.path_join(image_line, "AdaptiveFollow") if image_line else ""):
+        if d and d not in out:
+            out.append(d)
     return out
 
 
@@ -209,8 +221,9 @@ class Storage(object):
             names = self.list_references()
             if not names:
                 raise ReferenceMissingError(
-                    "no reference found in %s - export one from the Piano Roll first "
-                    "(Tools > Scripting > Adaptive Follow - Export Reference)"
+                    "no reference found in %s - export the part as a MIDI file and convert it with "
+                    "tools\\midi_to_reference.bat (or use the Piano Roll script 'Adaptive Follow - "
+                    "Export Reference' if your FL Studio lets it write files)"
                     % " / ".join(self._refs_dir(b) for b in self.search_dirs))
             chosen = names[0]
         fname = self.safe_name(chosen) + ".json"

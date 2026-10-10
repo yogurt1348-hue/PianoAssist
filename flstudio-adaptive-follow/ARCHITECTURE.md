@@ -3,13 +3,14 @@
 ## Поток данных
 
 ```
- Piano Roll (flpianoroll)                       %APPDATA%\AdaptiveFollow
- ┌───────────────────────────────┐              ┌──────────────────────────┐
- │ Export Reference.pyscript     │  читает ноты │ references\<имя>.json    │
- │  score.PPQ / noteCount /      │ ───────────► │ last_reference.txt       │
- │  getNote(i) (только чтение)   │   JSON       │ config.json              │
- └───────────────────────────────┘              │ command.txt (afctl.py)   │
-                                                │ logs\, reports\          │
+ FL Studio: Piano Roll > File > Export as MIDI file        ...\Settings\Hardware\AdaptiveFollow\data
+            │ part.mid                                      (MIDI-скрипт может читать/писать только здесь)
+            ▼                                              ┌──────────────────────────┐
+ tools\midi_to_reference.py (обычный Python, вне FL) ────► │ references\<имя>.json    │
+   midifile.py → build_reference_from_notes   JSON          │ last_reference.txt       │
+                                                           │ config.json              │
+ (Piano Roll script: тот же JSON, если FL разрешает ему     │ logs\, reports\          │
+  запись; в FL с API 40 — нет, отдельный интерпретатор)    └────────────┬─────────────┘
  MIDI-клавиатура                                └────────────┬─────────────┘
       │ Note On/Off (не помечаются handled →                 │ загрузка при
       │ FL играет инструмент как обычно)                     │ OnInit / af_reload
@@ -28,6 +29,13 @@
                                  general.processRECEvent(REC_Tempo) [tempo_control]
 ```
 
+Песочница FL Studio (проверено в FL с MIDI scripting API 40): Piano Roll script и MIDI
+device script работают в **разных интерпретаторах Python**, а `open()` вне разрешённых папок
+даёт `SystemError("<class '_io.FileIO'> returned NULL without setting an exception")`.
+MIDI-скрипту разрешена `...\Hardware\AdaptiveFollow\data`; поэтому референс создаётся
+внешним конвертером. `Storage.select` выбирает первую папку, где запись работает, и ищет
+референсы во всех; если запись невозможна нигде, MIDI-скрипт работает в памяти.
+
 Обратная связь: каждые ~20 мс читается реальная позиция FL
 (`transport.getSongPos(2)`, абсолютные тики), и контроллер исправляет расхождение
 между позицией FL и позицией исполнителя (а не просто «выставляет темп»).
@@ -45,7 +53,7 @@
 | `session.py` | связывает всё: фильтры MIDI, Arm/Disarm, цикл `tick`, dry-run, команды, отчёт |
 | `diagnostics.py` | лог с уровнями и ротацией, кольцевой буфер, отчёт |
 | `storage.py` | папки данных (первая, где FL разрешает запись; чтение — из всех), безопасные имена файлов Windows, атомарная запись, config/command |
-| `handoff.py` | передача референса из Piano Roll в MIDI-скрипт в памяти (`sys.modules`), если FL запрещает файлы |
+| `midifile.py` | чтение Standard MIDI File (формат 0/1) для конвертера `tools/midi_to_reference.py` |
 | `compat.py` | запасные реализации на случай урезанной стандартной библиотеки во встроенном Python FL |
 | `simulation.py` | виртуальный транспорт FL и синтетический исполнитель (тесты и симулятор) |
 

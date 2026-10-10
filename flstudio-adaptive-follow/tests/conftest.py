@@ -14,15 +14,6 @@ from adaptive_follow.simulation import VirtualTransport, synthetic_reference  # 
 from adaptive_follow.storage import Storage  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def _clean_handoff():
-    """The in-memory hand-off lives in sys.modules: never leak it between tests."""
-    from adaptive_follow import handoff
-    handoff.clear()
-    yield
-    handoff.clear()
-
-
 @pytest.fixture
 def storage(tmp_path):
     s = Storage(str(tmp_path / "AdaptiveFollow"))

@@ -14,7 +14,8 @@ Studio ускоряется, замедляется и ждёт вас.
 
 | Часть | Где работает | Что делает |
 |---|---|---|
-| `piano_roll_script/Adaptive Follow - Export Reference.pyscript` | Piano Roll, API `flpianoroll` | Один раз **читает** ноты вашей партии (не меняя их) и сохраняет «референс» в JSON |
+| `tools/midi_to_reference.py` (+ `.bat` для перетаскивания) | обычный Python **вне FL** | превращает MIDI-экспорт вашей партии в «референс» (JSON) и кладёт его в папку MIDI-скрипта — **основной способ** |
+| `piano_roll_script/Adaptive Follow - Export Reference.pyscript` | Piano Roll, API `flpianoroll` | то же прямо из Piano Roll — только если ваша версия FL разрешает этому скрипту запись файлов (в FL с API 40 — нет) |
 | `midi_device_script/device_AdaptiveFollow/device_AdaptiveFollow.py` | MIDI-скрипт контроллера, API `transport`/`mixer`/`general`/`midi`/`ui` | Слушает клавиатуру, сравнивает ноты с референсом, управляет транспортом |
 | `shared/adaptive_follow/` | общий чистый Python (без FL) | модель, референс, score follower, оценка темпа, контроллер транспорта, состояния, диагностика, хранилище |
 
@@ -26,12 +27,15 @@ Studio ускоряется, замедляется и ждёт вас.
 3. Перезапустите FL Studio. **OPTIONS > MIDI settings**: выберите вашу клавиатуру во
    входах (Input), включите **Enable**, в **Controller type** выберите **AdaptiveFollow**.
 4. Откройте **VIEW > Script output** — на вкладке AdaptiveFollow должно быть
-   `Adaptive Follow 0.1.2 ready. Reference: NONE (export one first). Dry-run: True.`
-5. Откройте партию, которую будете играть, в **Piano Roll**. Снимите выделение
-   (Ctrl+D) — иначе экспортируются только выделенные ноты.
-6. В меню скриптов Piano Roll запустите **Adaptive Follow - Export Reference**,
-   задайте имя, фильтр (все ноты или один цвет), окно аккорда → **Accept**. Появится
-   сообщение «exported N notes (M events)» и путь к файлу.
+   `Adaptive Follow 0.1.3 ready. Reference: NONE (...). Dry-run: True.`
+5. Сохраните партию, которую будете играть, как MIDI-файл: в **Piano Roll** этой партии —
+   меню Piano Roll **File > Export as MIDI file** (например `part.mid`). Можно и весь
+   проект: **FILE > Export > MIDI file** — тогда при конвертации выберите нужную дорожку.
+6. Перетащите `part.mid` на **`tools\midi_to_reference.bat`** (или
+   `python tools\midi_to_reference.py part.mid --name "Verse"`; список дорожек — `--list`,
+   выбор — `--track N`). Конвертер напишет, сколько нот/событий сохранено и куда:
+   `...\Settings\Hardware\AdaptiveFollow\data\references\<имя>.json` — единственная папка,
+   которую MIDI-скрипт может читать в песочнице FL.
 7. Поставьте курсор песни на начало партии (по умолчанию тик 0 референса = тик 0 песни;
    см. `offset_mode`/`offset_ticks` в настройках), заглушите (mute) экспортированную
    партию, если не хотите слышать её дважды.
@@ -67,14 +71,14 @@ Studio ускоряется, замедляется и ждёт вас.
 
 ## Ограничения MVP
 
-* **Piano Roll script и MIDI device script — разные API и разные контексты.** Они
-  не видят друг друга напрямую и обмениваются только файлом референса.
-* **Доступ к файлам может быть запрещён FL Studio.** Тогда модуль работает в памяти:
-  референс передаётся из Piano Roll в MIDI-скрипт напрямую (до закрытия FL — после
-  перезапуска экспортируйте снова), настройки — по умолчанию + `af_set`, лог — в Script
-  output. Проверка: `af_probe()`.
-* **Референс не обновляется автоматически.** Изменили партию — экспортируйте снова,
-  затем `af_reload()` (при выключенном слежении).
+* **FL Studio изолирует скрипты.** Piano Roll script и MIDI device script работают в
+  **разных интерпретаторах Python** и не видят память друг друга; `open()` разрешён только в
+  отдельных папках (MIDI-скрипту — `...\Hardware\AdaptiveFollow\data`). Поэтому референс
+  создаёт внешний конвертер MIDI → JSON. Что разрешено в вашей версии — `af_probe()`.
+  Если MIDI-скрипту не удаётся писать вообще, он работает в памяти (настройки по умолчанию
+  + `af_set`, лог в Script output).
+* **Референс не обновляется автоматически.** Изменили партию — снова экспортируйте MIDI,
+  сконвертируйте и выполните `af_reload()` (при выключенном слежении).
 * **Тестируйте на копии .flp.** Модуль меняет скорость воспроизведения и (если
   разрешено) темп проекта.
 * **Поведение транспорта и темпа может зависеть от версии FL Studio** (см. список
@@ -102,4 +106,4 @@ python -m venv .venv; .venv\Scripts\pip install -r requirements-dev.txt
 * [ARCHITECTURE.md](ARCHITECTURE.md) — поток данных, формат JSON, машина состояний, API FL.
 * [CHANGELOG.md](CHANGELOG.md), [docs/EXAMPLE_REPORT.txt](docs/EXAMPLE_REPORT.txt) — пример отчёта.
 * `tools/` — `install_windows.ps1`, `uninstall_windows.ps1`, `validate_install.py`,
-  `simulate_session.py`, `afctl.py`, `check_fl_api.py`.
+  `simulate_session.py`, `afctl.py`, `check_fl_api.py`, `midi_to_reference.py`/`.bat`.

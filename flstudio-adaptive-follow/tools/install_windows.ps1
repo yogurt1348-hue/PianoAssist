@@ -64,7 +64,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
-$Version = "0.1.2"
+$Version = "0.1.3"
 $MinPython = [Version]"3.9"
 $Root = Split-Path -Parent $PSScriptRoot
 $DeviceFolderName = "AdaptiveFollow"

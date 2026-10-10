@@ -184,8 +184,7 @@ def _start():
                        echo=print if (memory_only or config.log_level == "debug") else None)
     if memory_only:
         print("Adaptive Follow: FL Studio does not allow this script to write files, so it works in memory:\n"
-              "  settings = defaults (+ af_set, not saved), log = this window, the reference comes directly\n"
-              "  from 'Adaptive Follow - Export Reference' while FL Studio is open. Details: af_probe()")
+              "  settings = defaults (+ af_set, not saved), log = this window. Details: af_probe()")
     port = FLTransportPort()
     session = AdaptiveFollowSession(port, storage, diag, config)
     session.load_config()
@@ -199,7 +198,7 @@ def _start():
     _state["session"] = session
     _state["storage"] = storage
     print("Adaptive Follow %s ready. Reference: %s. Dry-run: %s. Type af_help() for commands."
-          % (__version__, session.reference.name if session.reference else "NONE (export one first)",
+          % (__version__, session.reference.name if session.reference else "NONE (convert a MIDI export with tools\\midi_to_reference.bat, then af_reload())",
              config.dry_run))
     if config.auto_arm and session.reference is not None:
         session.arm()
@@ -265,7 +264,6 @@ def OnIdle():
         now = session.clock()
         if now >= _state["next_poll"]:
             _state["next_poll"] = now + 0.5
-            session.poll_handoff()      # a new export from the Piano Roll (in memory)
             cmd = _state["storage"].take_command()
             if cmd:
                 session.diag.info("command file: %s" % cmd)
@@ -345,14 +343,13 @@ def af_probe():
     print("Python %s" % sys.version.split()[0])
     st = _state.get("storage")
     try:
-        from adaptive_follow import handoff
         from adaptive_follow.storage import Storage, candidate_data_dirs, fl_settings_from_sys_path
         fl = fl_settings_from_sys_path()
         print("FL Settings folder: %s" % (fl or "not found on sys.path"))
         probe = Storage.select(candidate_data_dirs(st.data_dir if st else "", fl))
         for line in probe.probe_summary():
             print("  " + line)
-        print(handoff.status())
+        print("references found: %s" % (", ".join(probe.list_references()) or "none"))
     except Exception as exc:
         print("probe failed: %r (%s)" % (exc, _state.get("error") or ""))
 

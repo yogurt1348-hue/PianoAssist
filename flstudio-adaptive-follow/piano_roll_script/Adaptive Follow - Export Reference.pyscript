@@ -23,7 +23,7 @@ whole part.
 
 import flpianoroll as flp
 
-EXPORTER_VERSION = "0.1.2"
+EXPORTER_VERSION = "0.1.3"
 COLOR_CHOICES = ["All notes"] + ["Only note color %d" % (i + 1) for i in range(16)]
 
 _last_message = [""]
@@ -149,7 +149,6 @@ def apply(form):
             raise ImportError("adaptive_follow not found")
         import adaptive_follow
         from adaptive_follow.reference import build_reference_from_notes, FILTER_ALL, FILTER_COLOR
-        from adaptive_follow import handoff
         from adaptive_follow.storage import Storage, candidate_data_dirs, fl_settings_from_sys_path
     except Exception as exc:
         _tell("Adaptive Follow is not installed correctly (cannot import the shared module: %r).\n"
@@ -184,12 +183,8 @@ def apply(form):
     if ref is None:
         _tell("Adaptive Follow: nothing exported.\n" + "\n".join(report["errors"] + report["warnings"]), True)
         return
-    # Always hand the reference over in memory (works when FL Studio blocks file access),
-    # and also save it as a file where FL Studio allows writing.
-    try:
-        serial = handoff.publish(ref)
-    except Exception:
-        serial = 0
+    # FL Studio sandboxes the scripts: save where this script may write (the MIDI script's
+    # data folder first). If nothing is writable, explain the MIDI-file converter.
     path = ""
     save_error = ""
     try:
@@ -197,16 +192,19 @@ def apply(form):
         path = storage.save_reference(ref)
     except Exception as exc:
         save_error = "%r" % (exc,)
-    if not path and not serial:
-        _tell("Adaptive Follow: could not save or hand over the reference (%s)" % save_error, True)
+    if not path:
+        _tell("Adaptive Follow: FL Studio does not let the Piano Roll script write a file the MIDI script "
+              "can read (%s).\n"
+              "Use the MIDI converter instead:\n"
+              "  1. Piano Roll menu > File > Export as MIDI file (save e.g. part.mid)\n"
+              "  2. drag part.mid onto tools\\midi_to_reference.bat (or run tools\\midi_to_reference.py part.mid)\n"
+              "  3. Script output > AdaptiveFollow tab: af_reload()" % (save_error or "no writable folder"), True)
         return
-    lines = ["Adaptive Follow: exported %d notes (%d events) as '%s'." % (report["exported"], ref.event_count, ref.name)]
-    if path:
-        lines.append("File: %s" % path)
-    else:
-        lines.append("FL Studio does not allow scripts to write files here, so no file was saved.")
-        lines.append("The reference was passed to the AdaptiveFollow MIDI script in memory: it is used "
-                     "automatically while FL Studio stays open (check with af_status() / af_probe()).")
+    lines = ["Adaptive Follow: exported %d notes (%d events) as '%s'." % (report["exported"], ref.event_count, ref.name),
+             "File: %s" % path]
+    if "\\hardware\\adaptivefollow\\" not in path.replace("/", "\\").lower():
+        lines.append("This folder may not be readable by the MIDI script: if af_reload() still shows "
+                     "'Reference: NONE', use tools\\midi_to_reference.bat with a MIDI export of this part.")
     lines.append("PPQ %d, chord window %d ticks, filter: %s." % (ppq, ref.chord_window_ticks, COLOR_CHOICES[combo]))
     skipped = report["skipped_filter"] + report["skipped_velocity"] + report["skipped_muted"]
     if skipped:

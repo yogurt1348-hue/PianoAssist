@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3
+
+* Проверено в FL Studio (MIDI scripting API 40): Piano Roll script и MIDI device script
+  работают в **разных интерпретаторах** — передача в памяти из 0.1.2 невозможна и удалена;
+  MIDI-скрипт может писать только в `...\Settings\Hardware\AdaptiveFollow\data`.
+* Новый **конвертер MIDI → reference** `tools/midi_to_reference.py` (+ `midi_to_reference.bat`
+  для перетаскивания): читает MIDI-файл (формат 0/1, выбор дорожки/канала, окно аккорда,
+  velocity) и пишет референс прямо в папку данных MIDI-скрипта. Это основной способ.
+* Порядок папок данных: сначала `Hardware\AdaptiveFollow\data`, затем папка Piano Roll
+  скриптов, затем `%APPDATA%`; чтение — из всех.
+* Сообщения Piano Roll скрипта и MIDI-скрипта подсказывают путь через конвертер.
+
 ## 0.1.2
 
 * Исправлено: `SystemError: <class '_io.FileIO'> returned NULL without setting an exception`
