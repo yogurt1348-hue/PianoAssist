@@ -78,6 +78,7 @@ add_library(cadenza_core STATIC
     Source/Adaptive/ReferencePerformance.cpp
     Source/Adaptive/TempoEstimator.cpp
     Source/Adaptive/ScoreFollower.cpp
+    Source/Adaptive/AdaptiveTransport.cpp
 )
 
 target_include_directories(cadenza_core
@@ -134,6 +135,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_polished_master_tests tests/PolishedMasterTests.cpp)
     cadenza_add_test(cadenza_adaptive_midifile_tests tests/AdaptiveMidiFileTests.cpp)
     cadenza_add_test(cadenza_adaptive_follower_tests tests/AdaptiveScoreFollowerTests.cpp)
+    cadenza_add_test(cadenza_adaptive_transport_tests tests/AdaptiveTransportTests.cpp)
 endif()
 
 # ============================================================

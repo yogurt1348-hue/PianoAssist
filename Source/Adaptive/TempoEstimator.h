@@ -20,9 +20,9 @@ struct TempoEstimatorConfig
 {
     double minBpm = 30.0;                 // absolute performer limits
     double maxBpm = 300.0;
-    double smoothing = 0.35;              // EMA weight of a new measurement (1 = none)
+    double smoothing = 0.5;               // EMA weight of a new measurement (1 = none)
     double maxChangeBpmPerSec = 25.0;     // slew limit of the smoothed estimate
-    int    regressionWindow = 5;          // anchors per slope measurement (2..16)
+    int    regressionWindow = 4;          // anchors per slope measurement (2..16)
     double minNominalSpanSec = 0.2;       // shortest nominal span worth measuring
     double pauseFactor = 2.5;             // live gap > factor x expected gap => pause
     double pauseMinSec = 1.0;             //   ...and longer than this
