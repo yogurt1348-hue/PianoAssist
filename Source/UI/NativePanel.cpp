@@ -205,6 +205,8 @@ NativePanel::NativePanel()
     addAndMakeVisible(m_openSf);
     addAndMakeVisible(m_openAudio);
     addAndMakeVisible(m_openMidi);
+    addAndMakeVisible(m_openAdaptive);
+    m_openAdaptive.setTooltip("Adaptive Song Mode: play your part of a MIDI song, the band follows you");
     addAndMakeVisible(m_openAnalyze);
 
     // Left hardware faceplate: CADENZA wordmark.
@@ -789,6 +791,7 @@ NativePanel::NativePanel()
     m_openSf.onClick        = [this] { if (m_cb.openSoundFont) m_cb.openSoundFont(); };
     m_openAudio.onClick     = [this] { if (m_cb.openAudioSettings) m_cb.openAudioSettings(); };
     m_openMidi.onClick      = [this] { if (m_cb.openMidiSettings)  m_cb.openMidiSettings(); };
+    m_openAdaptive.onClick  = [this] { if (m_cb.openAdaptiveSong)  m_cb.openAdaptiveSong(); };
     m_openAnalyze.onClick   = [this] { if (m_cb.openChordAnalysis) m_cb.openChordAnalysis(); };
     m_transposeDown.onClick = [this] { if (m_cb.nudgeTranspose) m_cb.nudgeTranspose(-1); };
     m_transposeUp.onClick   = [this] { if (m_cb.nudgeTranspose) m_cb.nudgeTranspose(+1); };
@@ -1588,7 +1591,7 @@ void NativePanel::resized()
     const bool showSettings = onPage({ 6 });         // Setting (file/device actions)
     const bool showEditor   = onPage({ kEditorPage });   // Editor (full-area piano roll)
     setVis(showSettings, { &m_fade, &m_openStyle, &m_importMidiStyle, &m_openSf,
-                            &m_openAudio, &m_openMidi, &m_openAnalyze, &m_aiSettings });
+                            &m_openAudio, &m_openMidi, &m_openAnalyze, &m_aiSettings, &m_openAdaptive });
 
     // On the Editor page the embedded piano roll owns the whole content area, so the
     // always-on upper band (chord LCD, transpose, registrations, OTS, pads) is hidden.
@@ -1708,7 +1711,8 @@ void NativePanel::resized()
         auto deviceRow = r.removeFromTop(30);
         m_openAudio.setBounds(deviceRow.removeFromLeft(90));  deviceRow.removeFromLeft(gap);
         m_openMidi.setBounds(deviceRow.removeFromLeft(80));   deviceRow.removeFromLeft(gap);
-        m_aiSettings.setBounds(deviceRow.removeFromLeft(120));
+        m_aiSettings.setBounds(deviceRow.removeFromLeft(120)); deviceRow.removeFromLeft(gap);
+        m_openAdaptive.setBounds(deviceRow.removeFromLeft(140));
         area.removeFromTop(gap);
     }
 

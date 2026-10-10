@@ -138,6 +138,18 @@ public:
     void setCaptureMode(bool on) noexcept { m_captureMode.store(on); }
     bool captureMode() const noexcept { return m_captureMode.load(); }
 
+    // --- Adaptive Song Mode ---
+    // Raw tap: every played note (hardware or on-screen) with its timestamp in
+    // seconds on the juce::Time::getMillisecondCounterHiRes() clock, before any
+    // split/chord routing. Fires on the MIDI thread; install once at startup.
+    using RawNoteCallback = std::function<void(int note, int velocity, bool isOn, double timeSec)>;
+    void setRawNoteCallback(RawNoteCallback cb) { m_onRawNote = std::move(cb); }
+    // Performance mode: the whole keyboard plays the Right 1/2/3 voices and the
+    // arranger side (split, chord detection, Syncro Start/Stop, left voice) is
+    // bypassed, so a pianist can play a full part over an adaptive backing.
+    void setPerformanceMode(bool on) noexcept { m_performanceMode.store(on); }
+    bool performanceMode() const noexcept { return m_performanceMode.load(); }
+
     // Returns the display name of the currently-detected chord, or "" if none.
     // Thread-safe; acquires the internal publish mutex.
     std::string currentChordDisplayName() const;
@@ -199,6 +211,8 @@ private:
     MidiControlMap m_controlMap;            // guarded by m_publishMutex
     std::atomic<bool> m_learnArmed { false };
     std::atomic<bool> m_captureMode { false };
+    std::atomic<bool> m_performanceMode { false };
+    RawNoteCallback m_onRawNote;
     CaptureCallback m_onCapture;
     ControlCallback m_onControl;
     ControlLearnCallback m_onControlLearn;

@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "UI/AdaptiveSongPanel.h"
 #include "Arranger/MidiStyleConverter.h"
 #include "Arranger/StyleLoader.h"
 #include "Arranger/SongLoader.h"
@@ -887,6 +888,13 @@ MainComponent::MainComponent()
     loadSettings();
     loadVoiceMap();
 
+    // Adaptive Song Mode hooks are installed before audio/MIDI devices start so
+    // the audio and MIDI threads never see them change.
+    m_adaptive.install();
+    m_midi.setRawNoteCallback([this](int note, int velocity, bool isOn, double timeSec) {
+        m_adaptive.onLiveNote(note, velocity, isOn, timeSec);
+    });
+
     // Start audio before installing hooks so noteOn arrivals have somewhere to go.
     // Restore the user's saved output-device choice (avoids a coloured virtual
     // device being silently re-selected each launch).
@@ -1115,6 +1123,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    m_adaptiveWindow.reset();   // stops Adaptive Song playback and leaves the mode
     saveSettings();
     m_styleEngine.allNotesOff();
     m_audio.deviceManager().removeChangeListener(this);
@@ -1494,6 +1503,105 @@ private:
     std::string m_pending;
     juce::String m_pendingPrev;
 };
+}
+
+namespace
+{
+class AdaptiveSongWindow final : public juce::DialogWindow
+{
+public:
+    explicit AdaptiveSongWindow(std::function<void()> onClose)
+        : juce::DialogWindow("Adaptive Song Mode", juce::Colour(0xff20242e),
+                             /*escapeCloses*/ true, /*nativeTitleBar*/ true),
+          m_onClose(std::move(onClose)) {}
+
+    void closeButtonPressed() override { if (m_onClose) m_onClose(); }
+
+private:
+    std::function<void()> m_onClose;
+};
+}
+
+void MainComponent::showAdaptiveSong()
+{
+    if (m_adaptiveWindow != nullptr) {
+        m_adaptiveWindow->toFront(true);
+        return;
+    }
+    juce::Component::SafePointer<MainComponent> safe(this);
+    cadenza::ui::AdaptiveSongPanel::Callbacks cb;
+    cb.engine = [safe]() -> cadenza::adaptive::AdaptiveSongEngine* {
+        auto* self = safe.getComponent();
+        return self ? &self->m_adaptive : nullptr;
+    };
+    cb.setModeActive = [safe](bool on) { if (auto* self = safe.getComponent()) self->setAdaptiveModeActive(on); };
+    cb.midiInputs = [safe] { auto* self = safe.getComponent(); return self ? self->m_midi.availableInputs() : juce::StringArray(); };
+    cb.selectedMidiInput = [safe] { auto* self = safe.getComponent(); return self ? self->m_midi.selectedInput() : juce::String(); };
+    cb.selectMidiInput = [safe](const juce::String& name) {
+        auto* self = safe.getComponent();
+        if (!self) return;
+        self->m_midi.setSelectedInput(name);
+        if (self->m_settings) {
+            self->m_settings->state().midiInputDevice = name.toStdString();
+            self->saveSettings();
+        }
+    };
+    cb.reservedChannels = [safe]() -> std::uint16_t {
+        auto* self = safe.getComponent();
+        if (!self) return 0;
+        // The live keyboard's voices (Right 1/2/3 + Left) keep their channels.
+        std::uint16_t mask = 0;
+        for (int i = 0; i < cadenza::midi::MidiRouter::kNumRightLayers; ++i) {
+            const int ch = self->m_midi.rightLayerChannel(i);
+            if (ch >= 1 && ch <= 16) mask = static_cast<std::uint16_t>(mask | (1u << (ch - 1)));
+        }
+        const int left = self->m_midi.leftChannel();
+        if (left >= 1 && left <= 16) mask = static_cast<std::uint16_t>(mask | (1u << (left - 1)));
+        return mask;
+    };
+
+    auto* content = new cadenza::ui::AdaptiveSongPanel(std::move(cb));
+    auto window = std::make_unique<AdaptiveSongWindow>([safe] {
+        // Defer: this runs inside the window's own closeButtonPressed().
+        juce::MessageManager::callAsync([safe] {
+            if (auto* self = safe.getComponent()) self->m_adaptiveWindow.reset();
+        });
+    });
+    window->setContentOwned(content, true);
+    window->centreAroundComponent(this, content->getWidth(), content->getHeight());
+    window->setVisible(true);
+    m_adaptiveWindow = std::move(window);
+}
+
+void MainComponent::setAdaptiveModeActive(bool active)
+{
+    if (active == m_adaptiveActive) return;
+    m_adaptiveActive = active;
+    if (active) {
+        // Stop the arranger band; the adaptive backing owns the sound now.
+        if (m_state.playing()) {
+            m_state.setPlaying(false);
+            m_audio.stop();
+            if (m_panel) m_panel->setPlaying(false);
+            pushToWeb("window.JuceBridge && window.JuceBridge.onPlayStateChanged(false);");
+        }
+        m_styleEngine.allNotesOff();
+        m_styleEngine.setEnabled(false);
+        // The Style Recorder's capture mode (on while an editable .cstyle is loaded)
+        // would swallow every key before the follower sees it: suspend it.
+        m_adaptiveSuspendedCapture = m_midi.captureMode();
+        m_recordArmed.store(false);
+        m_midi.setCaptureMode(false);
+        m_midi.setPerformanceMode(true);   // whole keyboard = your instrument, no chord zone
+        applyRightHand();
+        juce::Logger::writeToLog("[Adaptive] Adaptive Song Mode ON");
+    } else {
+        m_adaptive.stop();
+        m_midi.setPerformanceMode(false);
+        m_midi.setCaptureMode(m_adaptiveSuspendedCapture);
+        m_styleEngine.setEnabled(m_state.chordSourceEnabled("arranger"));
+        juce::Logger::writeToLog("[Adaptive] Adaptive Song Mode OFF (arranger restored)");
+    }
 }
 
 void MainComponent::showMidiSettings()
@@ -3696,6 +3804,8 @@ void MainComponent::startFadeOut()
 
 void MainComponent::togglePlayback()
 {
+    if (m_adaptiveActive)
+        setAdaptiveModeActive(false);   // the arranger takes over again
     const bool play = !m_state.playing();
     m_state.setPlaying(play);
     m_audio.cancelFadeOut();   // a manual start/stop overrides a running fade
@@ -3717,7 +3827,11 @@ void MainComponent::togglePlayback()
 
 void MainComponent::executeControlCommand(const std::string& command)
 {
-    if (command == "play") {
+    if (command == "play" && m_adaptiveActive) {
+        // A mapped Start/Stop button drives the adaptive song while that mode is on.
+        if (m_adaptive.playRequested()) m_adaptive.stop();
+        else m_adaptive.play();
+    } else if (command == "play") {
         togglePlayback();
     } else {
         if (m_songModeActive) setSongMode(false);
@@ -3771,6 +3885,8 @@ void MainComponent::triggerSection(const std::string& id)
 
 void MainComponent::timerCallback()
 {
+    m_adaptive.timerTick();   // Adaptive Song Mode: follower timeouts + diagnostics
+
     // Hot-plug MIDI: rescan ~every 2s (20Hz timer) so a keyboard plugged in after
     // launch is picked up automatically.
     if (++m_midiRescanTicks >= 40) {
@@ -3954,6 +4070,7 @@ void MainComponent::buildNativePanel()
     cb.openSoundFont = [this] { openSoundFontFileChooser(); };
     cb.openAudioSettings = [this] { showAudioSettings(); };
     cb.openMidiSettings  = [this] { showMidiSettings(); };
+    cb.openAdaptiveSong  = [this] { showAdaptiveSong(); };
     cb.openChordAnalysis = [this] { openChordAnalysisChooser(); };
 
     cb.onLoadInstrumentPlugin = [this](int channel) { choosePartInstrument(channel); };

@@ -1,6 +1,8 @@
 #include "MidiRouter.h"
 #include "ChordTypes.h"
 
+#include <cmath>
+
 namespace cadenza::midi
 {
 MidiRouter::MidiRouter()
@@ -153,6 +155,18 @@ void MidiRouter::injectNote(int note, int velocity, bool isOn)
         return;
     }
 
+    if (m_onRawNote) m_onRawNote(note, velocity, isOn, juce::Time::getMillisecondCounterHiRes() * 0.001);
+    if (m_performanceMode.load()) {
+        std::vector<LiveMelodyEvent> perf;
+        {
+            std::lock_guard<std::mutex> lk(m_publishMutex);
+            perf = m_rightHand.handleNote(note, velocity, isOn, true);
+        }
+        if (m_onNote)
+            for (const auto& ev : perf) m_onNote(ev.channel, ev.note, ev.velocity, ev.isOn);
+        return;
+    }
+
     std::optional<arranger::ChordRecognitionResult> currentChord;
     std::vector<LiveMelodyEvent> events;
     std::optional<LiveMelodyEvent> leftEv;
@@ -277,6 +291,32 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
             if (m_onCapture) m_onCapture(note, velocity, isOn);
             return;
         }
+
+        // Adaptive Song Mode: raw tap with the arrival time (MidiInput timestamps
+        // are on the getMillisecondCounterHiRes clock; fall back to "now").
+        if (m_onRawNote) {
+            const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+            const double ts = msg.getTimeStamp();
+            m_onRawNote(note, velocity, isOn, (ts > 0.0 && std::abs(ts - now) < 0.5) ? ts : now);
+        }
+    }
+
+    if (msg.isNoteOnOrOff() && m_performanceMode.load()) {
+        // Whole keyboard -> Right 1/2/3 voices; no split / chord / Syncro.
+        const int note = msg.getNoteNumber();
+        std::vector<LiveMelodyEvent> perf;
+        {
+            std::lock_guard<std::mutex> lk(m_publishMutex);
+            perf = m_rightHand.handleNote(note, msg.getVelocity(), msg.isNoteOn(), true);
+        }
+        if (m_onNote)
+            for (const auto& ev : perf) m_onNote(ev.channel, ev.note, ev.velocity, ev.isOn);
+        debugRoute = "performance";
+    } else if (msg.isNoteOnOrOff()) {
+        const int channel  = msg.getChannel();
+        const int note     = msg.getNoteNumber();
+        const int velocity = msg.getVelocity();
+        const bool isOn    = msg.isNoteOn();
 
         // 1. Forward to the arranger router FIRST so we know whether this note is
         //    in the melody (right-hand) zone before deciding how it should sound.
