@@ -27,7 +27,7 @@ Studio ускоряется, замедляется и ждёт вас.
 3. Перезапустите FL Studio. **OPTIONS > MIDI settings**: выберите вашу клавиатуру во
    входах (Input), включите **Enable**, в **Controller type** выберите **AdaptiveFollow**.
 4. Откройте **VIEW > Script output** — на вкладке AdaptiveFollow должно быть
-   `Adaptive Follow 0.1.3 ready. Reference: NONE (...). Dry-run: True.`
+   `Adaptive Follow 0.1.4 ready. Reference: NONE (...). Dry-run: True.`
 5. Сохраните партию, которую будете играть, как MIDI-файл: в **Piano Roll** этой партии —
    меню Piano Roll **File > Export as MIDI file** (например `part.mid`). Можно и весь
    проект: **FILE > Export > MIDI file** — тогда при конвертации выберите нужную дорожку.

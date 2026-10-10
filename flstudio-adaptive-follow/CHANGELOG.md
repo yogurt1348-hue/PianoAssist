@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.4
+
+* Исправлено: в FL Studio (API 40) слежение переходило в TRACKING, но транспорт не
+  запускался и скорость не менялась — цикл управления выполнялся только из `OnIdle`.
+  Теперь старт выполняется сразу на первой уверенной ноте (внутри `OnMidiMsg`), а шаг
+  управления скоростью вызывается из `OnIdle`, `OnMidiMsg` и `OnUpdateBeatIndicator`.
+* Лог: `transport.start() for start: isPlaying before=… after=…` для каждого старта/паузы,
+  предупреждение, если FL не изменил состояние воспроизведения; исключения записываются.
+* `af_status()` показывает, сколько раз FL вызвал `OnIdle` и откуда шли шаги управления.
+
 ## 0.1.3
 
 * Проверено в FL Studio (MIDI scripting API 40): Piano Roll script и MIDI device script

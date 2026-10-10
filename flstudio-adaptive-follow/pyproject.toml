@@ -1,6 +1,6 @@
 [project]
 name = "adaptive-follow"
-version = "0.1.3"
+version = "0.1.4"
 description = "Adaptive Follow MVP: FL Studio's transport follows a live performer (MIDI device script + Piano Roll exporter)"
 readme = "README.md"
 requires-python = ">=3.6"

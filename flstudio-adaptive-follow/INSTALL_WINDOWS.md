@@ -83,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 ### 2. Script output, консоль и режим отладки
 
 * **VIEW > Script output** — окно вывода скриптов. Выберите вкладку **AdaptiveFollow**:
-  при запуске должна быть строка `Adaptive Follow 0.1.3 ready ...`. Сюда же выводятся
+  при запуске должна быть строка `Adaptive Follow 0.1.4 ready ...`. Сюда же выводятся
   ошибки Python.
 * В этом окне есть консоль: команды выполняются в контексте выбранного скрипта.
 
@@ -190,8 +190,8 @@ FL Studio изолирует скрипты: Piano Roll script и MIDI device sc
 
 | Симптом | Что сделать |
 |---|---|
-| `cannot import the shared adaptive_follow module` | запустите установщик новой версии (0.1.3+) и нажмите **Reload script** в Script output. Быстрое ручное исправление: скопируйте папку `shared\adaptive_follow` из архива в `...\Settings\Hardware\AdaptiveFollow\` и в `...\Settings\Piano roll scripts\`. В сообщении об ошибке перечислено, где скрипт искал модуль |
-| `SystemError: <class '_io.FileIO'> returned NULL without setting an exception` | песочница FL запретила открыть файл. С 0.1.3 это не ошибка: скрипты пишут в первую разрешённую папку (MIDI-скрипт — `...\Hardware\AdaptiveFollow\data`), а если нельзя никуда — работают в памяти. Что разрешено — `af_probe()` |
+| `cannot import the shared adaptive_follow module` | запустите установщик новой версии (0.1.4+) и нажмите **Reload script** в Script output. Быстрое ручное исправление: скопируйте папку `shared\adaptive_follow` из архива в `...\Settings\Hardware\AdaptiveFollow\` и в `...\Settings\Piano roll scripts\`. В сообщении об ошибке перечислено, где скрипт искал модуль |
+| `SystemError: <class '_io.FileIO'> returned NULL without setting an exception` | песочница FL запретила открыть файл. С 0.1.4 это не ошибка: скрипты пишут в первую разрешённую папку (MIDI-скрипт — `...\Hardware\AdaptiveFollow\data`), а если нельзя никуда — работают в памяти. Что разрешено — `af_probe()` |
 | `Reference: NONE` | сделайте референс конвертером (раздел 3), затем `af_reload()` |
 | `reference file ... is corrupted` | экспортируйте заново; повреждённый файл не загружается, FL работает как обычно |
 | ноты не распознаются | `af_status()`; проверьте `midi_channel`, `min_velocity`, что играете ту же партию и октаву |

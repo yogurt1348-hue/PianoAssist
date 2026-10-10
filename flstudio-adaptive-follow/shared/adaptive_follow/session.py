@@ -33,7 +33,7 @@ from .diagnostics import Diagnostics
 from .reference import ReferenceFormatError
 from .storage import ReferenceMissingError, Storage
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 
 
 class AdaptiveFollowSession(object):
@@ -206,6 +206,10 @@ class AdaptiveFollowSession(object):
         if not was_started and self.follower.started and self.config.start_on_first_note:
             self._pending_start = True
         self._sync_state(now)
+        if self._pending_start:
+            # Start the accompaniment right here (inside OnMidiMsg), not on the next OnIdle.
+            self.diag.info("first confident note (event %d): starting the accompaniment now" % res.event_index, now)
+            self.tick(now)
         if self.diag.debug_enabled:
             self.diag.debug("note %d vel %d ch %d -> %s event=%d (tick %d) conf=%.2f bpm=%.1f state=%s"
                             % (pitch, velocity, channel, res.kind, res.event_index, res.event_tick,
@@ -351,12 +355,18 @@ class AdaptiveFollowSession(object):
         except Exception as exc:
             self.diag.error("setPlaybackSpeed failed: %r" % (exc,), now)
         try:
-            if d.action in (at.ACTION_START, at.ACTION_RESUME):
-                if not port.is_playing():
-                    port.play_pause()
-            elif d.action == at.ACTION_PAUSE:
-                if port.is_playing():
-                    port.play_pause()
+            if d.action in (at.ACTION_START, at.ACTION_RESUME, at.ACTION_PAUSE):
+                want = d.action != at.ACTION_PAUSE
+                before = bool(port.is_playing())
+                if before != want:
+                    port.play_pause()           # FL: transport.start() toggles play/pause
+                after = bool(port.is_playing())
+                self.diag.info("transport.start() for %s: isPlaying before=%s after=%s%s"
+                               % (d.action, before, after, "" if before != want else " (no call needed)"), now)
+                if after != want:
+                    self.diag.warning("FL Studio did not change playback state (isPlaying=%s after %s); "
+                                      "is FL in SONG mode and the project not stopped by a dialog?" % (after, d.action),
+                                      now)
             elif d.action == at.ACTION_SEEK:
                 if port.can_seek():
                     song = int(round(self.offset_song_ticks + d.seek_tick * self.project_ppq

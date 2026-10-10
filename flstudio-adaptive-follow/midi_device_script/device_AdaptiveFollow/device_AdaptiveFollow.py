@@ -9,7 +9,7 @@ they are compared with the exported reference part and FL Studio's transport
 follows you.
 
 Official MIDI Controller Scripting API used (FL Studio API stubs, IL-Group):
-  callbacks : OnInit, OnDeInit, OnMidiMsg, OnIdle, OnProjectLoad
+  callbacks : OnInit, OnDeInit, OnMidiMsg, OnIdle, OnUpdateBeatIndicator, OnProjectLoad
   transport : isPlaying, start (play/pause), getSongPos(SONGLENGTH_ABSTICKS),
               setSongPos(ticks, SONGLENGTH_ABSTICKS) [API >= 4], setPlaybackSpeed
   mixer     : getCurrentTempo
@@ -29,7 +29,8 @@ import mixer
 import transport
 import ui
 
-_state = {"session": None, "storage": None, "error": "", "next_poll": 0.0}  # type: dict
+_state = {"session": None, "storage": None, "error": "", "next_poll": 0.0,
+          "idle_calls": 0, "steps": 0, "last_step": -1.0, "step_sources": {}}  # type: dict
 
 
 # ------------------------------------------------------------------ bootstrap
@@ -233,6 +234,19 @@ def OnProjectLoad(status):
             pass
 
 
+def _drive(session, source):
+    """Run one control step (speed/tempo/pause). Called from OnIdle and, in case FL Studio
+    calls OnIdle rarely or not at all, also from OnMidiMsg and OnUpdateBeatIndicator."""
+    now = session.clock()
+    if now - _state["last_step"] < 0.01:
+        return
+    _state["last_step"] = now
+    _state["steps"] += 1
+    src = _state["step_sources"]
+    src[source] = src.get(source, 0) + 1
+    session.tick(now)
+
+
 def OnMidiMsg(msg):
     session = _state.get("session")
     if session is None:
@@ -247,6 +261,8 @@ def OnMidiMsg(msg):
         elif status == midi.MIDI_CONTROLCHANGE:
             if session.on_cc(msg.data1, msg.data2, channel):
                 msg.handled = True      # only explicitly configured control CCs are consumed
+        if session.sm.active:
+            _drive(session, "OnMidiMsg")
     except Exception as exc:
         try:
             session.diag.error("OnMidiMsg error: %r" % (exc,))
@@ -255,12 +271,27 @@ def OnMidiMsg(msg):
     # Notes are never marked handled: FL Studio plays them as usual.
 
 
+def OnUpdateBeatIndicator(value):
+    session = _state.get("session")
+    if session is None or not session.sm.active:
+        return
+    try:
+        _drive(session, "OnUpdateBeatIndicator")
+    except Exception as exc:
+        try:
+            session.diag.error("OnUpdateBeatIndicator error: %r" % (exc,))
+        except Exception:
+            pass
+
+
 def OnIdle():
+    _state["idle_calls"] += 1
     session = _state.get("session")
     if session is None:
         return
     try:
-        session.tick()
+        if session.sm.active:
+            _drive(session, "OnIdle")
         now = session.clock()
         if now >= _state["next_poll"]:
             _state["next_poll"] = now + 0.5
@@ -295,6 +326,10 @@ def af_status():
     s = _s()
     if s:
         print(s.status_line())
+        ago = s.clock() - _state["last_step"] if _state["last_step"] >= 0 else -1
+        print("OnIdle calls: %d; control steps: %d %s; last step %s; playing=%s"
+              % (_state["idle_calls"], _state["steps"], _state["step_sources"] or "",
+                 ("%.2f s ago" % ago) if ago >= 0 else "never", s._safe(s.port.is_playing, "?")))
 
 
 def af_arm():
