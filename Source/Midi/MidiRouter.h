@@ -149,6 +149,10 @@ public:
     // bypassed, so a pianist can play a full part over an adaptive backing.
     void setPerformanceMode(bool on) noexcept { m_performanceMode.store(on); }
     bool performanceMode() const noexcept { return m_performanceMode.load(); }
+    // Piano pedals (CC64 sustain, CC66 sostenuto, CC67 soft) from the keyboard,
+    // forwarded only in performance mode (the arranger path is unchanged).
+    using PedalCallback = std::function<void(int controller, int value)>;
+    void setPedalCallback(PedalCallback cb) { m_onPedal = std::move(cb); }
 
     // Returns the display name of the currently-detected chord, or "" if none.
     // Thread-safe; acquires the internal publish mutex.
@@ -213,6 +217,7 @@ private:
     std::atomic<bool> m_captureMode { false };
     std::atomic<bool> m_performanceMode { false };
     RawNoteCallback m_onRawNote;
+    PedalCallback m_onPedal;
     CaptureCallback m_onCapture;
     ControlCallback m_onControl;
     ControlLearnCallback m_onControlLearn;

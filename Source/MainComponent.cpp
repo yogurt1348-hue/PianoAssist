@@ -894,6 +894,10 @@ MainComponent::MainComponent()
     m_midi.setRawNoteCallback([this](int note, int velocity, bool isOn, double timeSec) {
         m_adaptive.onLiveNote(note, velocity, isOn, timeSec);
     });
+    m_midi.setPedalCallback([this](int cc, int value) {   // performance mode only
+        for (int i = 0; i < cadenza::midi::MidiRouter::kNumRightLayers; ++i)
+            m_audio.controlChange(m_midi.rightLayerChannel(i), cc, value);
+    });
 
     // Start audio before installing hooks so noteOn arrivals have somewhere to go.
     // Restore the user's saved output-device choice (avoids a coloured virtual
@@ -1597,6 +1601,8 @@ void MainComponent::setAdaptiveModeActive(bool active)
         juce::Logger::writeToLog("[Adaptive] Adaptive Song Mode ON");
     } else {
         m_adaptive.stop();
+        for (int i = 0; i < cadenza::midi::MidiRouter::kNumRightLayers; ++i)
+            m_audio.controlChange(m_midi.rightLayerChannel(i), 64, 0);   // never leave the pedal down
         m_midi.setPerformanceMode(false);
         m_midi.setCaptureMode(m_adaptiveSuspendedCapture);
         m_styleEngine.setEnabled(m_state.chordSourceEnabled("arranger"));

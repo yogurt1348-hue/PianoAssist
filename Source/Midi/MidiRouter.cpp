@@ -274,6 +274,9 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
         if (m_onPitchBend) m_onPitchBend(msg.getPitchWheelValue());
     } else if (msg.isController() && msg.getControllerNumber() == 1) {
         if (m_onModulation) m_onModulation(msg.getControllerValue());
+    } else if (msg.isController() && m_performanceMode.load()) {
+        const int cc = msg.getControllerNumber();
+        if ((cc == 64 || cc == 66 || cc == 67) && m_onPedal) m_onPedal(cc, msg.getControllerValue());
     }
 
     if (msg.isNoteOnOrOff()) {

@@ -166,6 +166,12 @@ target_link_libraries(ab-transpose PRIVATE cadenza_core)
 add_executable(style-scan
     tools/style-scan/main.cpp
 )
+
+# Copyright-free demo song for trying / validating Adaptive Song Mode.
+add_executable(adaptive-demo
+    tools/adaptive-demo/main.cpp
+)
+target_link_libraries(adaptive-demo PRIVATE cadenza_core)
 target_link_libraries(style-scan PRIVATE cadenza_core)
 if(MSVC)
     # /EHa lets _set_se_translator turn native faults (access violations in the
@@ -237,6 +243,10 @@ if(CADENZA_BUILD_TESTS)
     set_tests_properties(style_probe_diagnostics_plural_warnings PROPERTIES
         PASS_REGULAR_EXPRESSION "Diagnostics: 2 warnings"
     )
+
+    add_test(NAME adaptive_demo_writes_song
+             COMMAND adaptive-demo "${CMAKE_CURRENT_BINARY_DIR}/adaptive-demo.mid" --bpm 90 --tempo-change)
+    set_tests_properties(adaptive_demo_writes_song PROPERTIES PASS_REGULAR_EXPRESSION "4 tracks")
 
     add_executable(cadenza_sty_tests
         tools/sty-converter/StyParserTests.cpp
