@@ -1,0 +1,8 @@
+# Development / verification tools (installed into the venv with
+# install_windows.ps1 -WithDevTools, or: pip install -r requirements-dev.txt)
+-r requirements.txt
+pytest>=7
+mypy>=1.5
+# Official FL Studio API stubs from Image-Line (IL-Group/FL-Studio-API-Stubs);
+# used by tools/check_fl_api.py to verify that only documented API is called.
+fl-studio-api-stubs==37.0.1
