@@ -231,3 +231,27 @@ def test_no_hardcoded_songs_devices_or_users():
             text = f.read().lower()
         for word in banned:
             assert word not in text, "%s mentions %r" % (path, word)
+
+
+def test_device_script_explains_a_missing_shared_module(tmp_path):
+    """Without the package anywhere, OnInit must not crash and must say where it looked."""
+    import subprocess
+    script = os.path.join(ROOT, "midi_device_script", "device_AdaptiveFollow", "device_AdaptiveFollow.py")
+    code = r'''
+import sys, types, importlib.util
+for name in ("general", "midi", "mixer", "transport", "ui"):
+    sys.modules[name] = types.ModuleType(name)
+spec = importlib.util.spec_from_file_location("device_AdaptiveFollow", sys.argv[1])
+dev = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dev)
+dev.OnInit()
+dev.OnMidiMsg(None); dev.OnIdle(); dev.af_status()
+'''
+    env = {"APPDATA": str(tmp_path), "PATH": os.environ.get("PATH", "")}
+    r = subprocess.run([sys.executable, "-I", "-c", code, script], capture_output=True, text=True, env=env,
+                       cwd=str(tmp_path))
+    assert r.returncode == 0, r.stderr
+    out = r.stdout
+    assert "cannot import the shared adaptive_follow module" in out
+    assert "script folder" in out and "APPDATA" in out and "MISSING" in out and "sys.path" in out
+    assert "copy the folder shared\\adaptive_follow" in out

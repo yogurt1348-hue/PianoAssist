@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+* Исправлено: в FL Studio скрипты не находили общий модуль
+  (`ModuleNotFoundError: No module named 'adaptive_follow'`). По официальной документации
+  FL добавляет в путь поиска модулей папку самого скрипта, поэтому установщик теперь кладёт
+  копию `adaptive_follow` рядом с device script и Piano Roll script; `%APPDATA%` остаётся
+  запасным вариантом. При ошибке импорта скрипты перечисляют, где искали модуль.
+
 ## 0.1.0 — MVP (не выпущено)
 
 Первая версия отдельного модуля Adaptive Follow для FL Studio (Windows).

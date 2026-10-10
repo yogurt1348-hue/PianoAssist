@@ -34,27 +34,75 @@ _state = {"session": None, "storage": None, "error": "", "next_poll": 0.0}  # ty
 
 # ------------------------------------------------------------------ bootstrap
 
-def _bootstrap():
-    """Make the shared ``adaptive_follow`` package importable; return the data folder."""
-    import sys
-    lib = ""
-    data = ""
-    try:
-        import adaptive_follow_paths as paths    # written by the installer next to this file
-        lib = paths.LIB_DIR
-        data = paths.DATA_DIR
-    except Exception:
+def _env(name):
+    """Environment variable without depending on a full standard library."""
+    for mod in ("os", "nt"):
         try:
-            import os
-            appdata = os.environ.get("APPDATA", "")
-            if appdata:
-                lib = os.path.join(appdata, "AdaptiveFollow", "lib")
-                data = os.path.join(appdata, "AdaptiveFollow")
+            return str(__import__(mod).environ.get(name, "") or "")
+        except Exception:
+            continue
+    return ""
+
+
+def _file_exists(path):
+    try:
+        with open(path, "rb"):
+            return True
+    except Exception:
+        return False
+
+
+def _bootstrap():
+    """Import the shared ``adaptive_follow`` package. Returns (data_dir, problem).
+
+    Search order:
+      1. this script's own folder: FL Studio adds it to the module search path
+         (official docs), and the installer puts a copy of adaptive_follow there;
+      2. LIB_DIR from adaptive_follow_paths.py (written next to this script by the installer);
+      3. %APPDATA%\\AdaptiveFollow\\lib.
+    ``problem`` is "" on success, otherwise a description of every attempt.
+    """
+    import sys
+    notes = []
+    data = ""
+    lib = ""
+    try:
+        import adaptive_follow_paths as paths
+        lib = str(getattr(paths, "LIB_DIR", "") or "")
+        data = str(getattr(paths, "DATA_DIR", "") or "")
+    except Exception as exc:
+        notes.append("adaptive_follow_paths.py not loaded: %r" % (exc,))
+    appdata = _env("APPDATA").rstrip("\\/")
+    if appdata:
+        data = data or appdata + "\\AdaptiveFollow"
+    else:
+        notes.append("APPDATA environment variable not available")
+    candidates = [("script folder", "")]
+    if lib:
+        candidates.append(("LIB_DIR", lib))
+    if appdata:
+        candidates.append(("APPDATA", appdata + "\\AdaptiveFollow\\lib"))
+    for why, folder in candidates:
+        if folder and folder not in sys.path:
+            sys.path.insert(0, folder)
+        try:
+            import importlib
+            importlib.invalidate_caches()
         except Exception:
             pass
-    if lib and lib not in sys.path:
-        sys.path.insert(0, lib)
-    return data
+        try:
+            import adaptive_follow  # noqa: F401
+            return data, ""
+        except ImportError as exc:
+            where = (" %s (adaptive_follow\\__init__.py %s)"
+                     % (folder, "found" if _file_exists(folder + "\\adaptive_follow\\__init__.py") else "MISSING")
+                     if folder else "")
+            notes.append("%s%s: %r" % (why, where, exc))
+        except Exception as exc:
+            notes.append("%s: the package is broken: %r" % (why, exc))
+            break
+    notes.append("Python %s; sys.path: %s" % (sys.version.split()[0], "; ".join(str(p) for p in sys.path[:6])))
+    return data, "\n  ".join(notes)
 
 
 def _api_version():
@@ -113,14 +161,19 @@ class FLTransportPort(object):
 
 
 def _start():
-    data_dir = _bootstrap()
+    data_dir, problem = _bootstrap()
     try:
+        if problem:
+            raise ImportError("adaptive_follow not found")
         from adaptive_follow import __version__
         from adaptive_follow.diagnostics import Diagnostics
         from adaptive_follow.session import AdaptiveFollowSession
         from adaptive_follow.storage import Storage
     except Exception as exc:
-        _state["error"] = "cannot import the shared adaptive_follow module (%r); re-run the installer" % (exc,)
+        _state["error"] = ("cannot import the shared adaptive_follow module (%r).\n"
+                           "Fix: re-run tools\\install_windows.ps1, or copy the folder shared\\adaptive_follow "
+                           "into this script's folder (next to device_AdaptiveFollow.py) and click Reload script.\n"
+                           "Details:\n  %s" % (exc, problem or "-"))
         print("Adaptive Follow ERROR: " + _state["error"])
         return
     storage = Storage(data_dir or None)

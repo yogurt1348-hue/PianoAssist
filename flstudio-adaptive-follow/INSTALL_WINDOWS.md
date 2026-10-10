@@ -19,8 +19,9 @@
 |---|---|
 | MIDI device script | `<FL user data>\FL Studio\Settings\Hardware\AdaptiveFollow\device_AdaptiveFollow.py` |
 | Piano Roll script | `<FL user data>\FL Studio\Settings\Piano roll scripts\Adaptive Follow - Export Reference.pyscript` |
+| общий модуль `adaptive_follow` (для скриптов FL) | `...\Hardware\AdaptiveFollow\adaptive_follow\` и `...\Piano roll scripts\adaptive_follow\` — FL добавляет папку скрипта в путь поиска модулей |
 | пути установки (генерируется) | `adaptive_follow_paths.py` рядом с каждым из скриптов |
-| общий модуль `adaptive_follow` | `%APPDATA%\AdaptiveFollow\lib\adaptive_follow\` |
+| общий модуль `adaptive_follow` (для инструментов) | `%APPDATA%\AdaptiveFollow\lib\adaptive_follow\` |
 | референсы, настройки, логи, отчёты | `%APPDATA%\AdaptiveFollow\{references, config.json, logs, reports}` |
 | резервные копии перезаписанных файлов | `%APPDATA%\AdaptiveFollow\backup\<дата-время>\` |
 | манифест установки | `%APPDATA%\AdaptiveFollow\install-manifest.json` |
@@ -82,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 ### 2. Script output, консоль и режим отладки
 
 * **VIEW > Script output** — окно вывода скриптов. Выберите вкладку **AdaptiveFollow**:
-  при запуске должна быть строка `Adaptive Follow 0.1.0 ready ...`. Сюда же выводятся
+  при запуске должна быть строка `Adaptive Follow 0.1.1 ready ...`. Сюда же выводятся
   ошибки Python.
 * В этом окне есть консоль: команды выполняются в контексте выбранного скрипта.
 
@@ -160,7 +161,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 
 | Симптом | Что сделать |
 |---|---|
-| `cannot import the shared adaptive_follow module` | перезапустите установщик; проверьте `validate_install.py` |
+| `cannot import the shared adaptive_follow module` | запустите установщик новой версии (0.1.1+) и нажмите **Reload script** в Script output. Быстрое ручное исправление: скопируйте папку `shared\adaptive_follow` из архива в `...\Settings\Hardware\AdaptiveFollow\` и в `...\Settings\Piano roll scripts\`. В сообщении об ошибке перечислено, где скрипт искал модуль |
 | `Reference: NONE` | экспортируйте референс из Piano Roll, затем `af_reload()` |
 | `reference file ... is corrupted` | экспортируйте заново; повреждённый файл не загружается, FL работает как обычно |
 | ноты не распознаются | `af_status()`; проверьте `midi_channel`, `min_velocity`, что играете ту же партию и октаву |

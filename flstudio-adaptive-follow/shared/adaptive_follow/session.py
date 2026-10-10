@@ -33,7 +33,7 @@ from .diagnostics import Diagnostics
 from .reference import ReferenceFormatError
 from .storage import ReferenceMissingError, Storage
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 
 class AdaptiveFollowSession(object):

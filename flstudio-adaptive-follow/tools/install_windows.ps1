@@ -64,7 +64,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
-$Version = "0.1.0"
+$Version = "0.1.1"
 $MinPython = [Version]"3.9"
 $Root = Split-Path -Parent $PSScriptRoot
 $DeviceFolderName = "AdaptiveFollow"
@@ -315,6 +315,16 @@ Install-File (Join-Path (Join-Path (Join-Path $Root "midi_device_script") "devic
 Write-Utf8File (Join-Path $HardwareDir "adaptive_follow_paths.py") $pathsPy
 Install-File (Join-Path (Join-Path $Root "piano_roll_script") "Adaptive Follow - Export Reference.pyscript") (Join-Path $PianoRollDir "Adaptive Follow - Export Reference.pyscript")
 Write-Utf8File (Join-Path $PianoRollDir "adaptive_follow_paths.py") $pathsPy
+# FL Studio adds each script's own folder to its module search path (official docs:
+# "This folder should contain all resources required to run the script"), so a copy of
+# the shared package goes next to both scripts. %APPDATA%\AdaptiveFollow\lib stays for the tools.
+foreach ($scriptDir in @($HardwareDir, $PianoRollDir)) {
+    $pkgDir = Join-Path $scriptDir "adaptive_follow"
+    Ensure-Dir $pkgDir
+    foreach ($f in (Get-ChildItem -LiteralPath $srcPkg -Filter "*.py" -File | Sort-Object Name)) {
+        Install-File $f.FullName (Join-Path $pkgDir $f.Name)
+    }
+}
 
 # ---------------------------------------------------------------- 7-8 manifest + summary
 Step "7. Manifest"

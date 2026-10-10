@@ -122,6 +122,17 @@ if ($RestoreBackups) {
 
 # ---------------------------------------------------------------- files
 Step "Remove installed files"
+# The package copies next to the FL scripts (only if they are really ours).
+foreach ($fl in @(Get-Prop $m "fl_settings")) {
+    if (-not $fl) { continue }
+    foreach ($pkg in @((Join-Path (Join-Path (Join-Path $fl "Hardware") "AdaptiveFollow") "adaptive_follow"),
+                       (Join-Path (Join-Path $fl "Piano roll scripts") "adaptive_follow"))) {
+        $init = Join-Path $pkg "__init__.py"
+        if ((Test-Path -LiteralPath $init) -and ((Get-Content -LiteralPath $init -Raw) -match "Adaptive Follow")) {
+            Remove-Tree $pkg "adaptive_follow"
+        }
+    }
+}
 $restored = @()
 if ($RestoreBackups) { $restored = @(@(Get-Prop $m "backups") | ForEach-Object { Get-Prop $_ "original" }) }
 foreach ($f in @(Get-Prop $m "files")) {
@@ -143,7 +154,7 @@ foreach ($fl in @(Get-Prop $m "fl_settings")) {
                          (Join-Path (Join-Path $fl "Piano roll scripts") "__pycache__"))) {
         # Only our own compiled files; other scripts' caches stay.
         if (-not (Test-Path -LiteralPath $cache -PathType Container)) { continue }
-        foreach ($pyc in @(Get-ChildItem -LiteralPath $cache -File | Where-Object { $_.Name -like "adaptive_follow_paths.*.pyc" -or $_.Name -like "device_AdaptiveFollow.*.pyc" })) {
+        foreach ($pyc in @(Get-ChildItem -LiteralPath $cache -File | Where-Object { $_.Name -like "adaptive_follow_paths.*.pyc" -or $_.Name -like "device_AdaptiveFollow.*.pyc" -or $_.Name -like "Adaptive Follow - Export Reference.*.pyc" })) {
             Remove-FileSafe $pyc.FullName
         }
         Remove-DirIfEmpty $cache

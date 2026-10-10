@@ -83,6 +83,19 @@ def main():
     pr = os.path.join(fl, "Piano roll scripts", PYSCRIPT)
     check(os.path.isfile(pr), "Piano Roll script %s" % pr, "run tools\\install_windows.ps1")
 
+    print("\nShared module next to the scripts (FL Studio adds each script's folder to its module path)")
+    for folder in (hw, os.path.join(fl, "Piano roll scripts")):
+        init = os.path.join(folder, "adaptive_follow", "__init__.py")
+        if check(os.path.isfile(init), "package %s" % os.path.dirname(init), "run tools\\install_windows.ps1"):
+            sys.path.insert(0, os.path.join(ROOT, "shared"))
+            try:
+                from adaptive_follow import __version__ as src_version
+            finally:
+                sys.path.pop(0)
+            with open(init, encoding="utf-8") as f:
+                text = f.read()
+            check('__version__ = "%s"' % src_version in text, "version %s" % src_version, "re-run the installer to update")
+
     print("\nPaths file")
     lib = None
     for folder in (hw, os.path.join(fl, "Piano roll scripts")):

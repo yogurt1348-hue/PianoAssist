@@ -23,33 +23,81 @@ whole part.
 
 import flpianoroll as flp
 
-EXPORTER_VERSION = "0.1.0"
+EXPORTER_VERSION = "0.1.1"
 COLOR_CHOICES = ["All notes"] + ["Only note color %d" % (i + 1) for i in range(16)]
 
 _last_message = [""]
 
 
-def _bootstrap():
-    """Make the shared ``adaptive_follow`` package importable and return the data folder."""
-    import sys
-    lib = ""
-    data = ""
-    try:
-        import adaptive_follow_paths as paths   # written next to this script by the installer
-        lib = paths.LIB_DIR
-        data = paths.DATA_DIR
-    except Exception:
+def _env(name):
+    """Environment variable without depending on a full standard library."""
+    for mod in ("os", "nt"):
         try:
-            import os
-            appdata = os.environ.get("APPDATA", "")
-            if appdata:
-                lib = os.path.join(appdata, "AdaptiveFollow", "lib")
-                data = os.path.join(appdata, "AdaptiveFollow")
+            return str(__import__(mod).environ.get(name, "") or "")
+        except Exception:
+            continue
+    return ""
+
+
+def _file_exists(path):
+    try:
+        with open(path, "rb"):
+            return True
+    except Exception:
+        return False
+
+
+def _bootstrap():
+    """Import the shared ``adaptive_follow`` package. Returns (data_dir, problem).
+
+    Search order:
+      1. this script's own folder: FL Studio adds it to the module search path
+         (official docs), and the installer puts a copy of adaptive_follow there;
+      2. LIB_DIR from adaptive_follow_paths.py (written next to this script by the installer);
+      3. %APPDATA%\\AdaptiveFollow\\lib.
+    ``problem`` is "" on success, otherwise a description of every attempt.
+    """
+    import sys
+    notes = []
+    data = ""
+    lib = ""
+    try:
+        import adaptive_follow_paths as paths
+        lib = str(getattr(paths, "LIB_DIR", "") or "")
+        data = str(getattr(paths, "DATA_DIR", "") or "")
+    except Exception as exc:
+        notes.append("adaptive_follow_paths.py not loaded: %r" % (exc,))
+    appdata = _env("APPDATA").rstrip("\\/")
+    if appdata:
+        data = data or appdata + "\\AdaptiveFollow"
+    else:
+        notes.append("APPDATA environment variable not available")
+    candidates = [("script folder", "")]
+    if lib:
+        candidates.append(("LIB_DIR", lib))
+    if appdata:
+        candidates.append(("APPDATA", appdata + "\\AdaptiveFollow\\lib"))
+    for why, folder in candidates:
+        if folder and folder not in sys.path:
+            sys.path.insert(0, folder)
+        try:
+            import importlib
+            importlib.invalidate_caches()
         except Exception:
             pass
-    if lib and lib not in sys.path:
-        sys.path.insert(0, lib)
-    return data
+        try:
+            import adaptive_follow  # noqa: F401
+            return data, ""
+        except ImportError as exc:
+            where = (" %s (adaptive_follow\\__init__.py %s)"
+                     % (folder, "found" if _file_exists(folder + "\\adaptive_follow\\__init__.py") else "MISSING")
+                     if folder else "")
+            notes.append("%s%s: %r" % (why, where, exc))
+        except Exception as exc:
+            notes.append("%s: the package is broken: %r" % (why, exc))
+            break
+    notes.append("Python %s; sys.path: %s" % (sys.version.split()[0], "; ".join(str(p) for p in sys.path[:6])))
+    return data, "\n  ".join(notes)
 
 
 def _tell(text, popup):
@@ -95,14 +143,17 @@ def _value(form, name, default):
 
 
 def apply(form):
-    data_dir = _bootstrap()
+    data_dir, problem = _bootstrap()
     try:
+        if problem:
+            raise ImportError("adaptive_follow not found")
         import adaptive_follow
         from adaptive_follow.reference import build_reference_from_notes, FILTER_ALL, FILTER_COLOR
         from adaptive_follow.storage import Storage
     except Exception as exc:
         _tell("Adaptive Follow is not installed correctly (cannot import the shared module: %r).\n"
-              "Run tools\\install_windows.ps1 again." % (exc,), True)
+              "Fix: run tools\\install_windows.ps1 again, or copy the folder shared\\adaptive_follow into "
+              "the 'Piano roll scripts' folder next to this script.\nDetails:\n  %s" % (exc, problem or "-"), True)
         return
 
     name = str(_value(form, "Reference name", "My part") or "My part")
