@@ -64,7 +64,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
-$Version = "0.1.1"
+$Version = "0.1.2"
 $MinPython = [Version]"3.9"
 $Root = Split-Path -Parent $PSScriptRoot
 $DeviceFolderName = "AdaptiveFollow"
@@ -315,6 +315,9 @@ Install-File (Join-Path (Join-Path (Join-Path $Root "midi_device_script") "devic
 Write-Utf8File (Join-Path $HardwareDir "adaptive_follow_paths.py") $pathsPy
 Install-File (Join-Path (Join-Path $Root "piano_roll_script") "Adaptive Follow - Export Reference.pyscript") (Join-Path $PianoRollDir "Adaptive Follow - Export Reference.pyscript")
 Write-Utf8File (Join-Path $PianoRollDir "adaptive_follow_paths.py") $pathsPy
+# FL Studio may block open() for scripts in some folders; the scripts then fall back to
+# this data folder inside the device script's folder (created here, since mkdir may be blocked too).
+foreach ($d in @("references", "logs", "reports")) { Ensure-Dir (Join-Path (Join-Path $HardwareDir "data") $d) }
 # FL Studio adds each script's own folder to its module search path (official docs:
 # "This folder should contain all resources required to run the script"), so a copy of
 # the shared package goes next to both scripts. %APPDATA%\AdaptiveFollow\lib stays for the tools.

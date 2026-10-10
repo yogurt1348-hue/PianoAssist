@@ -169,6 +169,13 @@ if ($removeAllData) {
         if (Test-Path -LiteralPath $p -PathType Container) { Remove-Tree $p $n }
         else { Remove-FileSafe $p }
     }
+    # Fallback data folders the FL scripts use when FL Studio blocks file access elsewhere.
+    foreach ($fl in @(Get-Prop $m "fl_settings")) {
+        if (-not $fl) { continue }
+        Remove-Tree (Join-Path (Join-Path (Join-Path $fl "Hardware") "AdaptiveFollow") "data") "data"
+        $imageLine = Split-Path -Parent (Split-Path -Parent $fl)
+        if ($imageLine) { Remove-Tree (Join-Path $imageLine "AdaptiveFollow") "AdaptiveFollow" }
+    }
 } else {
     Say "  kept: references, config.json, logs, reports, backup (use -RemoveData to delete them)"
 }
@@ -180,6 +187,15 @@ foreach ($d in $dirs) {
     if ($venv -and $d -eq $venv) { continue }
     if (-not $removeAllData -and $d -eq $DataPath) { continue }
     Remove-DirIfEmpty $d
+}
+# Our folder in FL's Hardware folder (and its fallback data folder) go away once empty,
+# even when they existed before this installation.
+foreach ($fl in @(Get-Prop $m "fl_settings")) {
+    if (-not $fl) { continue }
+    $hw = Join-Path (Join-Path $fl "Hardware") "AdaptiveFollow"
+    foreach ($sub in @("references", "logs", "reports")) { Remove-DirIfEmpty (Join-Path (Join-Path $hw "data") $sub) }
+    Remove-DirIfEmpty (Join-Path $hw "data")
+    Remove-DirIfEmpty $hw
 }
 if ($removeAllData) {
     Remove-FileSafe $manifestPath

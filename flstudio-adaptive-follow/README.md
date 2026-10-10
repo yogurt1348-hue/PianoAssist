@@ -26,7 +26,7 @@ Studio ускоряется, замедляется и ждёт вас.
 3. Перезапустите FL Studio. **OPTIONS > MIDI settings**: выберите вашу клавиатуру во
    входах (Input), включите **Enable**, в **Controller type** выберите **AdaptiveFollow**.
 4. Откройте **VIEW > Script output** — на вкладке AdaptiveFollow должно быть
-   `Adaptive Follow 0.1.1 ready. Reference: NONE (export one first). Dry-run: True.`
+   `Adaptive Follow 0.1.2 ready. Reference: NONE (export one first). Dry-run: True.`
 5. Откройте партию, которую будете играть, в **Piano Roll**. Снимите выделение
    (Ctrl+D) — иначе экспортируются только выделенные ноты.
 6. В меню скриптов Piano Roll запустите **Adaptive Follow - Export Reference**,
@@ -69,6 +69,10 @@ Studio ускоряется, замедляется и ждёт вас.
 
 * **Piano Roll script и MIDI device script — разные API и разные контексты.** Они
   не видят друг друга напрямую и обмениваются только файлом референса.
+* **Доступ к файлам может быть запрещён FL Studio.** Тогда модуль работает в памяти:
+  референс передаётся из Piano Roll в MIDI-скрипт напрямую (до закрытия FL — после
+  перезапуска экспортируйте снова), настройки — по умолчанию + `af_set`, лог — в Script
+  output. Проверка: `af_probe()`.
 * **Референс не обновляется автоматически.** Изменили партию — экспортируйте снова,
   затем `af_reload()` (при выключенном слежении).
 * **Тестируйте на копии .flp.** Модуль меняет скорость воспроизведения и (если

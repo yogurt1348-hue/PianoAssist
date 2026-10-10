@@ -26,14 +26,15 @@ changes happen in tick().
 
 from . import adaptive_transport as at
 from . import compat
+from . import handoff
 from . import model
 from . import score_follower as sf
 from . import state as st
 from .diagnostics import Diagnostics
-from .reference import ReferenceFormatError
+from .reference import Reference, ReferenceFormatError
 from .storage import ReferenceMissingError, Storage
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 
 class AdaptiveFollowSession(object):
@@ -58,6 +59,7 @@ class AdaptiveFollowSession(object):
         self._pending_start = False
         self._config_mtime = 0.0
         self._last_hint = ""
+        self._handoff_serial = 0
 
     # =============================================================== loading
     def load_config(self):
@@ -79,6 +81,8 @@ class AdaptiveFollowSession(object):
             ref, path = self.storage.load_reference(wanted)
         except (ReferenceMissingError, ReferenceFormatError) as exc:
             self.reference = None
+            if not wanted and self.poll_handoff(force=True):
+                return True             # no file (or files blocked), but an in-memory export exists
             self.diag.error("reference not loaded: %s" % exc)
             self._hint("Adaptive Follow: no valid reference (see log)")
             return False
@@ -93,6 +97,35 @@ class AdaptiveFollowSession(object):
         self.diag.info("reference %r loaded: %d notes, %d events, PPQ %d (%s)"
                        % (ref.name, len(ref.notes), ref.event_count, ref.ppq, path))
         return True
+
+    def set_reference(self, ref, source):
+        """Use ``ref`` (already validated) as the reference. Not while armed."""
+        if self.sm.active:
+            self.diag.warning("cannot change the reference while armed; disarm first")
+            return False
+        self.reference = ref
+        self.reference_path = source
+        for w in ref.warnings:
+            self.diag.warning("reference: " + w)
+        self.diag.info("reference %r loaded: %d notes, %d events, PPQ %d (%s)"
+                       % (ref.name, len(ref.notes), ref.event_count, ref.ppq, source))
+        return True
+
+    def poll_handoff(self, force=False):
+        """Pick up a reference the Piano Roll exporter published in memory (see handoff.py).
+        Only while disarmed; returns True when a new reference was taken."""
+        if self.sm.active:
+            return False
+        serial, text, _name = handoff.latest()
+        if not serial or (serial == self._handoff_serial and not force):
+            return False
+        self._handoff_serial = serial
+        try:
+            ref = Reference.from_json(text)
+        except ReferenceFormatError as exc:
+            self.diag.error("in-memory reference is invalid: %s" % exc)
+            return False
+        return self.set_reference(ref, "in memory, Piano Roll export #%d" % serial)
 
     def maybe_reload_config(self):
         """Pick up config.json edits while disarmed."""
@@ -237,6 +270,7 @@ class AdaptiveFollowSession(object):
                 self.load_config()
                 self.reference = None
                 self.load_reference()
+                self.poll_handoff()         # a newer in-memory export wins
         elif cmd == "report":
             return self.write_report()
         elif cmd == "status":
@@ -383,7 +417,9 @@ class AdaptiveFollowSession(object):
         lines = ["version: %s" % VERSION,
                  "state: %s" % self.sm.state,
                  "reference: %s (%s)" % (self.reference.name if self.reference else "-", self.reference_path or "-"),
-                 "data dir: %s" % self.storage.data_dir,
+                 "data dir: %s (%s)" % (self.storage.data_dir,
+                                         "writable" if getattr(self.storage, "writable", True) else "NOT writable"),
+                 handoff.status(),
                  "config: %s" % compat.json_dumps(self.config.to_dict(), indent=None),
                  "disabled features: %s" % (", ".join(sorted(self.disabled_features)) or "-"),
                  "status: %s" % self.status_line(),

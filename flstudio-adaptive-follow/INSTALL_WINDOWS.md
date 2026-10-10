@@ -83,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 ### 2. Script output, консоль и режим отладки
 
 * **VIEW > Script output** — окно вывода скриптов. Выберите вкладку **AdaptiveFollow**:
-  при запуске должна быть строка `Adaptive Follow 0.1.1 ready ...`. Сюда же выводятся
+  при запуске должна быть строка `Adaptive Follow 0.1.2 ready ...`. Сюда же выводятся
   ошибки Python.
 * В этом окне есть консоль: команды выполняются в контексте выбранного скрипта.
 
@@ -95,7 +95,8 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
   | `af_dry_run(True)` / `af_dry_run(False)` | безопасный режим вкл/выкл |
   | `af_reload()` | перечитать настройки и референс (при выключенном слежении) |
   | `af_report()` | записать диагностический отчёт |
-  | `af_set("midi_channel", 2)` | изменить настройку (сохраняется в config.json) |
+  | `af_set("midi_channel", 2)` | изменить настройку (сохраняется в config.json; если FL запрещает запись — действует до закрытия FL) |
+  | `af_probe()` | что разрешает ваш FL: запись/чтение файлов в каждой папке данных, передача референса в памяти |
 
 * Если консоль недоступна в вашей версии — те же команды из обычной командной строки:
   `python tools\afctl.py status`, `... arm`, `... dry-run off`, `... report`, `... set follow_strategy hybrid`
@@ -161,7 +162,8 @@ powershell -ExecutionPolicy Bypass -File tools\install_windows.ps1
 
 | Симптом | Что сделать |
 |---|---|
-| `cannot import the shared adaptive_follow module` | запустите установщик новой версии (0.1.1+) и нажмите **Reload script** в Script output. Быстрое ручное исправление: скопируйте папку `shared\adaptive_follow` из архива в `...\Settings\Hardware\AdaptiveFollow\` и в `...\Settings\Piano roll scripts\`. В сообщении об ошибке перечислено, где скрипт искал модуль |
+| `cannot import the shared adaptive_follow module` | запустите установщик новой версии (0.1.2+) и нажмите **Reload script** в Script output. Быстрое ручное исправление: скопируйте папку `shared\adaptive_follow` из архива в `...\Settings\Hardware\AdaptiveFollow\` и в `...\Settings\Piano roll scripts\`. В сообщении об ошибке перечислено, где скрипт искал модуль |
+| `SystemError: <class '_io.FileIO'> returned NULL without setting an exception` | встроенный Python FL запретил открыть файл. С версии 0.1.2 это не ошибка: скрипты пробуют несколько папок (`%APPDATA%\AdaptiveFollow`, `...\Hardware\AdaptiveFollow\data`, `Документы\Image-Line\AdaptiveFollow`), а если запись запрещена везде — работают в памяти: экспорт из Piano Roll передаётся MIDI-скрипту напрямую, пока FL открыт. Что разрешено — покажет `af_probe()` |
 | `Reference: NONE` | экспортируйте референс из Piano Roll, затем `af_reload()` |
 | `reference file ... is corrupted` | экспортируйте заново; повреждённый файл не загружается, FL работает как обычно |
 | ноты не распознаются | `af_status()`; проверьте `midi_channel`, `min_velocity`, что играете ту же партию и октаву |

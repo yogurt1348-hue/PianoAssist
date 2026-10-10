@@ -20,7 +20,7 @@ Every call is wrapped; unavailable features are disabled with a log message.
 
 Console commands (View > Script output, select this device, type):
   af_help()  af_status()  af_arm()  af_disarm()  af_toggle()
-  af_dry_run(True/False)  af_reload()  af_report()  af_set("key", value)
+  af_dry_run(True/False)  af_reload()  af_report()  af_set("key", value)  af_probe()
 """
 
 import general
@@ -168,7 +168,7 @@ def _start():
         from adaptive_follow import __version__
         from adaptive_follow.diagnostics import Diagnostics
         from adaptive_follow.session import AdaptiveFollowSession
-        from adaptive_follow.storage import Storage
+        from adaptive_follow.storage import Storage, candidate_data_dirs, fl_settings_from_sys_path
     except Exception as exc:
         _state["error"] = ("cannot import the shared adaptive_follow module (%r).\n"
                            "Fix: re-run tools\\install_windows.ps1, or copy the folder shared\\adaptive_follow "
@@ -176,11 +176,16 @@ def _start():
                            "Details:\n  %s" % (exc, problem or "-"))
         print("Adaptive Follow ERROR: " + _state["error"])
         return
-    storage = Storage(data_dir or None)
-    storage.ensure_dirs()
+    # FL Studio may block open() in some folders: use the first folder where writing works.
+    storage = Storage.select(candidate_data_dirs(data_dir, fl_settings_from_sys_path()))
     config = storage.load_config()
-    diag = Diagnostics(storage.log_path, config.log_level, config.log_max_kb,
-                       echo=print if config.log_level == "debug" else None)
+    memory_only = not storage.writable
+    diag = Diagnostics(storage.log_path if not memory_only else None, config.log_level, config.log_max_kb,
+                       echo=print if (memory_only or config.log_level == "debug") else None)
+    if memory_only:
+        print("Adaptive Follow: FL Studio does not allow this script to write files, so it works in memory:\n"
+              "  settings = defaults (+ af_set, not saved), log = this window, the reference comes directly\n"
+              "  from 'Adaptive Follow - Export Reference' while FL Studio is open. Details: af_probe()")
     port = FLTransportPort()
     session = AdaptiveFollowSession(port, storage, diag, config)
     session.load_config()
@@ -260,6 +265,7 @@ def OnIdle():
         now = session.clock()
         if now >= _state["next_poll"]:
             _state["next_poll"] = now + 0.5
+            session.poll_handoff()      # a new export from the Piano Roll (in memory)
             cmd = _state["storage"].take_command()
             if cmd:
                 session.diag.info("command file: %s" % cmd)
@@ -333,6 +339,24 @@ def af_report():
         print("report written to %s" % s.write_report())
 
 
+def af_probe():
+    """What this FL Studio allows: file access per data folder, in-memory hand-off."""
+    import sys
+    print("Python %s" % sys.version.split()[0])
+    st = _state.get("storage")
+    try:
+        from adaptive_follow import handoff
+        from adaptive_follow.storage import Storage, candidate_data_dirs, fl_settings_from_sys_path
+        fl = fl_settings_from_sys_path()
+        print("FL Settings folder: %s" % (fl or "not found on sys.path"))
+        probe = Storage.select(candidate_data_dirs(st.data_dir if st else "", fl))
+        for line in probe.probe_summary():
+            print("  " + line)
+        print(handoff.status())
+    except Exception as exc:
+        print("probe failed: %r (%s)" % (exc, _state.get("error") or ""))
+
+
 def af_set(key, value):
     """Change one setting (saved to config.json). Allowed only while disarmed."""
     s = _s()
@@ -344,8 +368,12 @@ def af_set(key, value):
     try:
         cfg = s.config.copy()
         setattr(cfg, key, value)
-        s.storage.save_config(cfg)
-        s.load_config()
-        print("%s = %r" % (key, getattr(s.config, key)))
+        if s.storage.save_config(cfg):
+            s.load_config()
+            print("%s = %r" % (key, getattr(s.config, key)))
+        else:
+            s.config = cfg              # file access blocked: keep it for this FL session
+            s.diag.set_level(cfg.log_level)
+            print("%s = %r (in memory only: FL Studio blocked saving config.json)" % (key, getattr(cfg, key)))
     except Exception as exc:
         print("cannot set %s: %s" % (key, exc))

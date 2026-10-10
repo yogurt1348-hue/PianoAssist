@@ -412,3 +412,47 @@ def write_text_atomic(path, text):
 def append_text(path, text):
     with open(path, "a", encoding="utf-8") as f:
         f.write(text)
+
+
+def probe_dir(path):
+    """Which file operations work in ``path``? Returns (writable, readable, text).
+
+    FL Studio's embedded Python can block ``open()`` (SystemError from
+    ``_io.FileIO``); this tells the scripts where they may keep their data.
+    """
+    notes = []
+    made = make_dirs(path)
+    if not made and not dir_exists(path):
+        notes.append("mkdir failed")
+    probe = path_join(path, ".af_probe.tmp")
+    writable = readable = False
+    try:
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        writable = True
+    except Exception as exc:
+        notes.append("write: %r" % (exc,))
+    if writable:
+        try:
+            with open(probe, "r", encoding="utf-8") as f:
+                readable = f.read() == "ok"
+        except Exception as exc:
+            notes.append("read: %r" % (exc,))
+        remove_file(probe)
+    else:
+        # can existing files be read?
+        for name in list_dir(path):
+            p = path_join(path, name)
+            if file_exists(p):
+                try:
+                    with open(p, "rb") as f:
+                        f.read(1)
+                    readable = True
+                except Exception as exc:
+                    notes.append("read: %r" % (exc,))
+                break
+    text = "write %s, read %s" % ("OK" if writable else "BLOCKED",
+                                 "OK" if readable else ("BLOCKED" if notes and not writable else "?"))
+    if notes:
+        text += " (" + "; ".join(notes) + ")"
+    return writable, readable, text
