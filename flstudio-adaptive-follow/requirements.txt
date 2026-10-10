@@ -1,6 +1,0 @@
-# Adaptive Follow runtime dependencies.
-#
-# None: the FL Studio scripts and the shared adaptive_follow package use only
-# the Python standard library (and FL Studio's own modules inside FL Studio).
-# The installer still runs "pip install -r requirements.txt" in its venv so
-# that future dependencies are installed the same way.
