@@ -138,6 +138,7 @@ public:
         std::function<void()> openSoundFont;
         std::function<void()> openAudioSettings;
         std::function<void()> openMidiSettings;
+        std::function<void()> openAdaptiveSong;      // Adaptive Song Mode window
         std::function<void()> openChordAnalysis;     // analyze an audio file for chords
         std::function<void(int)> nudgeTranspose;     // delta -1 / +1
         std::function<void(int)> nudgeOctave;         // delta -1 / +1
@@ -302,6 +303,7 @@ private:
     juce::TextButton m_openSf     { "Open SoundFont" };
     juce::TextButton m_openAudio  { "Audio" };
     juce::TextButton m_openMidi   { "MIDI" };
+    juce::TextButton m_openAdaptive { "Adaptive Song..." };
     juce::TextButton m_openAnalyze { "Analyze Song" };
 
     // Left nav rail (icon nav items). Stage A: visual frame; paging next.

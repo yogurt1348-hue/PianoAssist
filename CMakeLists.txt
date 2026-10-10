@@ -73,6 +73,15 @@ add_library(cadenza_core STATIC
     Source/UI/StylePartNoteWorkflow.cpp
     Source/UI/StylePartPianoRollGeometry.cpp
     Source/UI/FirstLaunchChecklist.cpp
+    Source/Adaptive/MidiFile.cpp
+    Source/Adaptive/TempoMap.cpp
+    Source/Adaptive/ReferencePerformance.cpp
+    Source/Adaptive/TempoEstimator.cpp
+    Source/Adaptive/ScoreFollower.cpp
+    Source/Adaptive/AdaptiveTransport.cpp
+    Source/Adaptive/BackingSequence.cpp
+    Source/Adaptive/AdaptiveSong.cpp
+    Source/Adaptive/AdaptiveSongSession.cpp
 )
 
 target_include_directories(cadenza_core
@@ -127,6 +136,11 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_audio_chord_tests tests/AudioChordAnalysisTests.cpp)
     cadenza_add_test(cadenza_first_launch_tests tests/FirstLaunchChecklistTests.cpp)
     cadenza_add_test(cadenza_polished_master_tests tests/PolishedMasterTests.cpp)
+    cadenza_add_test(cadenza_adaptive_midifile_tests tests/AdaptiveMidiFileTests.cpp)
+    cadenza_add_test(cadenza_adaptive_follower_tests tests/AdaptiveScoreFollowerTests.cpp)
+    cadenza_add_test(cadenza_adaptive_transport_tests tests/AdaptiveTransportTests.cpp)
+    cadenza_add_test(cadenza_adaptive_backing_tests tests/AdaptiveBackingTests.cpp)
+    cadenza_add_test(cadenza_adaptive_session_tests tests/AdaptiveSessionTests.cpp)
 endif()
 
 # ============================================================
@@ -152,6 +166,12 @@ target_link_libraries(ab-transpose PRIVATE cadenza_core)
 add_executable(style-scan
     tools/style-scan/main.cpp
 )
+
+# Copyright-free demo song for trying / validating Adaptive Song Mode.
+add_executable(adaptive-demo
+    tools/adaptive-demo/main.cpp
+)
+target_link_libraries(adaptive-demo PRIVATE cadenza_core)
 target_link_libraries(style-scan PRIVATE cadenza_core)
 if(MSVC)
     # /EHa lets _set_se_translator turn native faults (access violations in the
@@ -224,6 +244,10 @@ if(CADENZA_BUILD_TESTS)
         PASS_REGULAR_EXPRESSION "Diagnostics: 2 warnings"
     )
 
+    add_test(NAME adaptive_demo_writes_song
+             COMMAND adaptive-demo "${CMAKE_CURRENT_BINARY_DIR}/adaptive-demo.mid" --bpm 90 --tempo-change)
+    set_tests_properties(adaptive_demo_writes_song PROPERTIES PASS_REGULAR_EXPRESSION "4 tracks")
+
     add_executable(cadenza_sty_tests
         tools/sty-converter/StyParserTests.cpp
     )
@@ -275,6 +299,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
             Source/UI/StylePartPatternImport.cpp
             Source/UI/StylePartPianoRoll.cpp
             Source/Ai/StyleGenerator.cpp
+            Source/Adaptive/AdaptiveSongEngine.cpp
+            Source/UI/AdaptiveSongPanel.cpp
     )
 
     target_compile_definitions(Cadenza
@@ -368,6 +394,21 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
         )
         add_test(NAME cadenza_ai_style_validation_tests
                  COMMAND cadenza_ai_style_validation_tests)
+    endif()
+
+    # Linux developer builds: JUCE's juce::URL (used by the AI assist) is backed
+    # by libcurl there and must be linked explicitly. Windows/macOS are unaffected.
+    if(UNIX AND NOT APPLE)
+        find_package(CURL QUIET)
+        if(CURL_FOUND)
+            foreach(_curl_target Cadenza cadenza_pattern_import_tests cadenza_midi_style_converter_tests cadenza_ai_style_validation_tests)
+                if(TARGET ${_curl_target})
+                    target_link_libraries(${_curl_target} PRIVATE CURL::libcurl)
+                endif()
+            endforeach()
+        else()
+            message(WARNING "libcurl not found: JUCE targets may fail to link on Linux (install libcurl4-openssl-dev)")
+        endif()
     endif()
 
     add_custom_command(TARGET Cadenza POST_BUILD

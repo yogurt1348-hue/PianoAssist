@@ -12,6 +12,7 @@
 #include "Arranger/SongPlayer.h"
 #include "Arranger/StyleRecorder.h"
 #include "Arranger/MidiStyleConverter.h"
+#include "Adaptive/AdaptiveSongEngine.h"
 
 #include <atomic>
 #include "Settings/SettingsStore.h"
@@ -116,6 +117,10 @@ private:
     bool analyzeAudioFile(const juce::File& file);
     void setSongMode(bool enabled);
 
+    // Adaptive Song Mode (the band follows a pianist playing a reference part).
+    void showAdaptiveSong();
+    void setAdaptiveModeActive(bool active);   // performance keyboard + arranger off while active
+
     // Style Recorder (record your own style patterns into a .cstyle).
     void recorderNewSession(int bars);
     void recorderSetBars(int bars);
@@ -174,6 +179,9 @@ private:
     cadenza::audio::AudioEngine m_audio;
     cadenza::midi::MidiRouter   m_midi;
     cadenza::arranger::StyleEngine m_styleEngine { m_audio };
+    cadenza::adaptive::AdaptiveSongEngine m_adaptive { m_audio };
+    bool m_adaptiveActive = false;
+    bool m_adaptiveSuspendedCapture = false;   // Style Recorder capture paused by Adaptive mode
     mutable cadenza::arranger::StyleLibraryIndex m_factoryStyleIndex;
 
     // Song mode (chord-chart auto-stepping).
@@ -230,6 +238,9 @@ private:
 
     // First-launch "Quick Start" assistant (shown once; see setupAssistantSeen).
     std::unique_ptr<juce::DialogWindow> m_firstLaunchWindow;
+
+    // Adaptive Song window (declared last: destroyed before the engines it uses).
+    std::unique_ptr<juce::DialogWindow> m_adaptiveWindow;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
