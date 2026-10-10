@@ -73,6 +73,9 @@ add_library(cadenza_core STATIC
     Source/UI/StylePartNoteWorkflow.cpp
     Source/UI/StylePartPianoRollGeometry.cpp
     Source/UI/FirstLaunchChecklist.cpp
+    Source/Adaptive/MidiFile.cpp
+    Source/Adaptive/TempoMap.cpp
+    Source/Adaptive/ReferencePerformance.cpp
 )
 
 target_include_directories(cadenza_core
@@ -127,6 +130,7 @@ if(CADENZA_BUILD_TESTS)
     cadenza_add_test(cadenza_audio_chord_tests tests/AudioChordAnalysisTests.cpp)
     cadenza_add_test(cadenza_first_launch_tests tests/FirstLaunchChecklistTests.cpp)
     cadenza_add_test(cadenza_polished_master_tests tests/PolishedMasterTests.cpp)
+    cadenza_add_test(cadenza_adaptive_midifile_tests tests/AdaptiveMidiFileTests.cpp)
 endif()
 
 # ============================================================
@@ -368,6 +372,21 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
         )
         add_test(NAME cadenza_ai_style_validation_tests
                  COMMAND cadenza_ai_style_validation_tests)
+    endif()
+
+    # Linux developer builds: JUCE's juce::URL (used by the AI assist) is backed
+    # by libcurl there and must be linked explicitly. Windows/macOS are unaffected.
+    if(UNIX AND NOT APPLE)
+        find_package(CURL QUIET)
+        if(CURL_FOUND)
+            foreach(_curl_target Cadenza cadenza_pattern_import_tests cadenza_midi_style_converter_tests cadenza_ai_style_validation_tests)
+                if(TARGET ${_curl_target})
+                    target_link_libraries(${_curl_target} PRIVATE CURL::libcurl)
+                endif()
+            endforeach()
+        else()
+            message(WARNING "libcurl not found: JUCE targets may fail to link on Linux (install libcurl4-openssl-dev)")
+        endif()
     endif()
 
     add_custom_command(TARGET Cadenza POST_BUILD
