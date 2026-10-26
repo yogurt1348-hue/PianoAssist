@@ -22,6 +22,9 @@ struct TempoChange
 class TempoMap
 {
 public:
+    /** 480 PPQ at the default 120 BPM, for a song that is not loaded yet. */
+    TempoMap() = default;
+
     /** changes may be unsorted and may omit tick 0 (the default tempo is used
         until the first change). Equal ticks keep the last change, matching
         how sequencers resolve stacked tempo events. */
@@ -39,13 +42,12 @@ public:
     double tempoBpmAt (std::int64_t tick) const noexcept;
 
 private:
-    TempoMap() = default;
     std::size_t segmentForTick (std::int64_t tick) const noexcept;
     double secondsPerTick (std::size_t segment) const noexcept;
 
     std::uint16_t ticksPerQuarter_ = 480;
-    std::vector<TempoChange> changes_;     // sorted, first entry at tick 0
-    std::vector<double> segmentStartSeconds_;
+    std::vector<TempoChange> changes_ { TempoChange {} }; // sorted, first entry at tick 0
+    std::vector<double> segmentStartSeconds_ { 0.0 };
 };
 
 } // namespace pianoassist::smf

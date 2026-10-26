@@ -27,7 +27,6 @@ Result<TempoMap> TempoMap::create (std::uint16_t ticksPerQuarter, std::vector<Te
 
     TempoMap map;
     map.ticksPerQuarter_ = ticksPerQuarter;
-    map.changes_.push_back ({ 0, defaultMicrosecondsPerQuarter });
     for (const auto& change : changes)
     {
         if (change.tick == map.changes_.back().tick)
