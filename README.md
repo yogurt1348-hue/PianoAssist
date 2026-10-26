@@ -32,6 +32,10 @@ software equivalent of a hardware "arranger keyboard," built with JUCE and C++.
   - one-chord-per-section detection keeps imported styles in key.
 - 🤖 **AI assist (optional, bring-your-own Anthropic API key)** — generate fills /
   intros / endings and "polish" a style's notes, using the Claude API. Fully opt-in.
+- 🎼 **Adaptive Song Mode** — load any multitrack MIDI song, play your part (e.g. the
+  piano track) on a MIDI keyboard, and the rest of the arrangement follows *you*:
+  tempo, pauses and small mistakes included (Setting → Adaptive Song...; see
+  [docs/ADAPTIVE_SONG_ARCHITECTURE.md](docs/ADAPTIVE_SONG_ARCHITECTURE.md)).
 - 🔊 **General-MIDI playback** via FluidSynth + a SoundFont; loads Yamaha `.sty/.prs`
   styles and the native JSON-based `.cstyle` format.
 

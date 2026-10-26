@@ -122,6 +122,14 @@ public:
     using TickCallback = std::function<void(int ticksAdvanced, Transport&)>;
     void setOnTick(TickCallback cb) { m_onTick = std::move(cb); }
 
+    // Optional per-block hook, called on the audio thread every block (playing or
+    // not) right after the transport/StyleEngine events and before the synth
+    // renders, so MIDI it sends is heard in the same block. Used by Adaptive Song
+    // Mode, which runs its own adaptive playhead. Install once before the audio
+    // device starts. Must be real-time safe.
+    using BlockCallback = std::function<void(int numFrames, double sampleRate)>;
+    void setOnBlock(BlockCallback cb) { m_onBlock = std::move(cb); }
+
     Transport& transport() noexcept { return m_transport; }
     SynthEngine& synth() noexcept   { return *m_synth; }
 
@@ -184,5 +192,6 @@ private:
     juce::AudioSourcePlayer   m_sourcePlayer;
 
     TickCallback m_onTick;
+    BlockCallback m_onBlock;
 };
 }

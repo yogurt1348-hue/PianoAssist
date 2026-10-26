@@ -1,3 +1,4 @@
+#include "Diagnostics/AppLog.h"
 #include "MainComponent.h"
 #include "UI/CadenzaLookAndFeel.h"
 
@@ -7,19 +8,19 @@ class CadenzaApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "Cadenza"; }
-    const juce::String getApplicationVersion() override { return "0.1.0"; }
+    const juce::String getApplicationVersion() override { return CADENZA_VERSION_STRING; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
     void initialise(const juce::String&) override
     {
         // Route all juce::Logger::writeToLog(...) output to a readable file at
-        // %APPDATA%/Cadenza/cadenza.log (a fresh file each launch) so playback /
-        // MIDI / mixer behaviour can be diagnosed after the fact.
-        const auto logFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                                 .getChildFile("Cadenza")
-                                 .getChildFile("cadenza.log");
-        logFile.deleteFile();
-        m_logger.reset(new juce::FileLogger(logFile, "=== Cadenza session start ==="));
+        // %APPDATA%/Cadenza/cadenza.log (a fresh file each launch; the previous
+        // run is kept as cadenza-previous.log) so playback / MIDI / mixer
+        // behaviour can be diagnosed after the fact.
+        cadenza::diagnostics::rotateLogs();
+        m_logger.reset(new juce::FileLogger(cadenza::diagnostics::currentLogFile(),
+                                            "=== Cadenza session start === version " + getApplicationVersion()
+                                                + ", " + juce::SystemStats::getOperatingSystemName()));
         juce::Logger::setCurrentLogger(m_logger.get());
 
         // Install the app-wide "sleek dark DAW" theme before any window is built

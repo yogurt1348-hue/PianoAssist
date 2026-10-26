@@ -1,6 +1,9 @@
 #include "MidiRouter.h"
 #include "ChordTypes.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace cadenza::midi
 {
 MidiRouter::MidiRouter()
@@ -82,6 +85,21 @@ int MidiRouter::refreshInputs()
         }
     }
 
+    // Close ports whose device has gone (keyboard unplugged / powered off) so
+    // the same device is opened again when it comes back; Windows usually
+    // reuses the identifier, which the "already open" check below would skip.
+    for (int i = m_inputs.size(); --i >= 0;) {
+        const auto id = m_inputs[i]->getIdentifier();
+        const bool present = std::any_of(available.begin(), available.end(),
+                                         [&id](const juce::MidiDeviceInfo& d) { return d.identifier == id; });
+        if (present)
+            continue;
+        juce::Logger::writeToLog("[Cadenza] MIDI input CLOSED (disconnected): \"" + m_inputs[i]->getName() + "\"");
+        m_inputs[i]->stop();
+        m_openIdentifiers.removeString(id);
+        m_inputs.remove(i);
+    }
+
     const bool autoMode = m_selectedInput.isEmpty();
     for (const auto& d : available) {
         // AUTO: open the keyboard's main port(s), skip aux pad/DAW-control ports.
@@ -150,6 +168,18 @@ void MidiRouter::injectNote(int note, int velocity, bool isOn)
     // part — skip split routing, chord detection and the melody voice.
     if (m_captureMode.load()) {
         if (m_onCapture) m_onCapture(note, velocity, isOn);
+        return;
+    }
+
+    if (m_onRawNote) m_onRawNote(note, velocity, isOn, juce::Time::getMillisecondCounterHiRes() * 0.001);
+    if (m_performanceMode.load()) {
+        std::vector<LiveMelodyEvent> perf;
+        {
+            std::lock_guard<std::mutex> lk(m_publishMutex);
+            perf = m_rightHand.handleNote(note, velocity, isOn, true);
+        }
+        if (m_onNote)
+            for (const auto& ev : perf) m_onNote(ev.channel, ev.note, ev.velocity, ev.isOn);
         return;
     }
 
@@ -260,6 +290,9 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
         if (m_onPitchBend) m_onPitchBend(msg.getPitchWheelValue());
     } else if (msg.isController() && msg.getControllerNumber() == 1) {
         if (m_onModulation) m_onModulation(msg.getControllerValue());
+    } else if (msg.isController() && m_performanceMode.load()) {
+        const int cc = msg.getControllerNumber();
+        if ((cc == 64 || cc == 66 || cc == 67) && m_onPedal) m_onPedal(cc, msg.getControllerValue());
     }
 
     if (msg.isNoteOnOrOff()) {
@@ -277,6 +310,32 @@ void MidiRouter::handleIncomingMidiMessage(juce::MidiInput* source, const juce::
             if (m_onCapture) m_onCapture(note, velocity, isOn);
             return;
         }
+
+        // Adaptive Song Mode: raw tap with the arrival time (MidiInput timestamps
+        // are on the getMillisecondCounterHiRes clock; fall back to "now").
+        if (m_onRawNote) {
+            const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+            const double ts = msg.getTimeStamp();
+            m_onRawNote(note, velocity, isOn, (ts > 0.0 && std::abs(ts - now) < 0.5) ? ts : now);
+        }
+    }
+
+    if (msg.isNoteOnOrOff() && m_performanceMode.load()) {
+        // Whole keyboard -> Right 1/2/3 voices; no split / chord / Syncro.
+        const int note = msg.getNoteNumber();
+        std::vector<LiveMelodyEvent> perf;
+        {
+            std::lock_guard<std::mutex> lk(m_publishMutex);
+            perf = m_rightHand.handleNote(note, msg.getVelocity(), msg.isNoteOn(), true);
+        }
+        if (m_onNote)
+            for (const auto& ev : perf) m_onNote(ev.channel, ev.note, ev.velocity, ev.isOn);
+        debugRoute = "performance";
+    } else if (msg.isNoteOnOrOff()) {
+        const int channel  = msg.getChannel();
+        const int note     = msg.getNoteNumber();
+        const int velocity = msg.getVelocity();
+        const bool isOn    = msg.isNoteOn();
 
         // 1. Forward to the arranger router FIRST so we know whether this note is
         //    in the melody (right-hand) zone before deciding how it should sound.

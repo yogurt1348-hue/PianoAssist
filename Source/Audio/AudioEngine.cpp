@@ -94,6 +94,8 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             const int ticksAdvanced = m_transport.advance(info.numSamples);
             if (m_onTick && ticksAdvanced > 0)
                 m_onTick(ticksAdvanced, m_transport);
+            if (m_onBlock)
+                m_onBlock(info.numSamples, m_currentSampleRate);   // Adaptive Song Mode
         },
         [&] {  // 2) render synth (clears buffer first, then renders queued notes)
             if (m_synth) m_synth->renderBlock(view);

@@ -1,0 +1,122 @@
+name: Windows test build
+
+# Builds the portable PianoAssist test build: Release + FluidSynth (vcpkg),
+# the MSVC runtime app-local, GeneralUser GS SoundFont with its license, demo
+# songs and the Russian instructions. The result is uploaded as the workflow
+# artifact "PianoAssist-test-build-<commit>" (download it from the run page;
+# GitHub delivers it as a .zip).
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # GeneralUser GS v2.0.3 by S. Christian Collins, pinned to a commit and
+  # verified by hash. License: documentation/LICENSE.txt in the same commit.
+  GUGS_COMMIT: 684543d5e5efaef08d02be50dcda8d552478fa60
+  GUGS_SHA256: 9575028c7a1f589f5770fccc8cff2734566af40cd26ed836944e9a5152688cfe
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clone JUCE 8.0.13
+        run: git clone --depth 1 --branch 8.0.13 https://github.com/juce-framework/JUCE.git lib/JUCE
+
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Set up Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: vcpkg cache key
+        id: vcpkg-key
+        shell: pwsh
+        run: |
+          $rev = git -C "$env:VCPKG_INSTALLATION_ROOT" rev-parse HEAD
+          "key=vcpkg-fluidsynth-x64-windows-$rev" >> $env:GITHUB_OUTPUT
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\vcpkg-cache" | Out-Null
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\vcpkg-cache
+          key: ${{ steps.vcpkg-key.outputs.key }}
+
+      - name: Install FluidSynth (vcpkg)
+        shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}\vcpkg-cache
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install fluidsynth:x64-windows
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Configure (Release, FluidSynth)
+        shell: pwsh
+        run: |
+          $sha = "${{ github.event.pull_request.head.sha || github.sha }}".Substring(0, 7)
+          "BUILD_ID=$sha" >> $env:GITHUB_ENV
+          cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows "-DCADENZA_BUILD_ID=$sha" 2>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (-not (Select-String -Path configure.log -Pattern "FluidSynth available" -Quiet)) {
+            Write-Error "FluidSynth was not found: the build would be silent"
+          }
+
+      - name: Build
+        run: cmake --build build-release
+
+      - name: Test
+        run: ctest --test-dir build-release --output-on-failure
+
+      - name: Download SoundFont (GeneralUser GS v2.0.3)
+        shell: pwsh
+        run: |
+          $base = "https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/$env:GUGS_COMMIT"
+          Invoke-WebRequest "$base/GeneralUser-GS.sf2" -OutFile "$env:RUNNER_TEMP\GeneralUser-GS.sf2"
+          Invoke-WebRequest "$base/documentation/LICENSE.txt" -OutFile "$env:RUNNER_TEMP\GeneralUser-GS-LICENSE.txt"
+          $hash = (Get-FileHash "$env:RUNNER_TEMP\GeneralUser-GS.sf2" -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:GUGS_SHA256) { Write-Error "SoundFont hash mismatch: $hash" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          ./scripts/package-portable.ps1 -BuildDir build-release -OutDir dist `
+            -VcpkgBin "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin" `
+            -SoundFont "$env:RUNNER_TEMP\GeneralUser-GS.sf2" `
+            -SoundFontLicense "$env:RUNNER_TEMP\GeneralUser-GS-LICENSE.txt" `
+            -BuildId "$env:BUILD_ID"
+
+      - name: Smoke check (package is complete and the exe starts)
+        shell: pwsh
+        run: |
+          $pkg = Get-ChildItem dist -Directory | Select-Object -First 1
+          foreach ($f in "Cadenza Workstation.exe", "vcruntime140.dll", "msvcp140.dll", "START-HERE.txt",
+                         "MANUAL-TEST.txt", "resources\sf2\GeneralUser-GS-v2.0.3.sf2",
+                         "resources\sf2\GeneralUser-GS-LICENSE.txt", "Demo\demo-both-hands-80bpm.mid",
+                         "Demo\demo-right-hand-80bpm.mid") {
+            if (-not (Test-Path (Join-Path $pkg.FullName $f))) { Write-Error "Missing from package: $f" }
+          }
+          if (-not (Get-ChildItem $pkg.FullName -Filter "*fluidsynth*.dll")) { Write-Error "FluidSynth DLL missing" }
+          # Start the app for a few seconds: a missing DLL makes it exit at once.
+          $p = Start-Process -FilePath (Join-Path $pkg.FullName "Cadenza Workstation.exe") -WorkingDirectory $pkg.FullName -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { Write-Error "The app exited during start-up (exit code $($p.ExitCode))" }
+          Stop-Process -Id $p.Id -Force
+          $log = Join-Path $env:APPDATA "Cadenza\cadenza.log"
+          if (Test-Path $log) { Get-Content $log | Select-Object -First 60 }
+          "PKG_NAME=$($pkg.Name)" >> $env:GITHUB_ENV
+
+      - name: Upload test build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG_NAME }}
+          path: dist/${{ env.PKG_NAME }}
+          retention-days: 30
+          if-no-files-found: error
