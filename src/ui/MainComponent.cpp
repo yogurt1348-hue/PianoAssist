@@ -116,6 +116,20 @@ MainComponent::MainComponent (Intents intents)
     for (auto* c : std::initializer_list<juce::Component*> { &playButton_, &stopButton_, &silenceButton_, &volume_,
                                                               &volumeLabel_, &timeLabel_, &transportNote_ })
         addAndMakeVisible (c);
+
+    practiceToggle_.setTooltip ("Playback stops at each note or chord of your hand until you play it on the piano");
+    practiceToggle_.onClick = [this] { if (intents_.practiceChanged) intents_.practiceChanged (practiceToggle_.getToggleState()); };
+    modeBox_.addItem ("Both hands", 1);
+    modeBox_.addItem ("Right hand", 2);
+    modeBox_.addItem ("Left hand", 3);
+    modeBox_.setSelectedId (1, juce::dontSendNotification);
+    modeBox_.setTooltip ("Which hand you play. The app plays everything else.");
+    modeBox_.onChange = [this] { if (intents_.modeChanged) intents_.modeChanged (modeBox_.getSelectedId() - 1); };
+    waitingLabel_.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+    gateLabel_.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
+    gateLabel_.setJustificationType (juce::Justification::centredRight);
+    for (auto* c : std::initializer_list<juce::Component*> { &practiceToggle_, &modeBox_, &waitingLabel_, &gateLabel_ })
+        addAndMakeVisible (c);
     setWantsKeyboardFocus (true);
 
     roll_.onZoomChanged = [this] (double pps) { if (intents_.zoomChanged) intents_.zoomChanged (pps); };
@@ -137,14 +151,15 @@ void MainComponent::setTransport (const TransportView& view)
     playButton_.setEnabled (hasSong && view.audioAvailable);
     stopButton_.setEnabled (hasSong && view.audioAvailable);
     silenceButton_.setEnabled (view.audioAvailable);
-    playButton_.setButtonText (view.state == State::playing ? "Pause" : "Play");
+    const bool running = view.state == State::playing || view.state == State::waiting;
+    playButton_.setButtonText (running ? "Pause" : "Play");
     timeLabel_.setText (hasSong ? formatTime (view.positionSeconds) + " / " + formatTime (view.durationSeconds) : juce::String(),
                         juce::dontSendNotification);
 
     juce::String note;
     if (! view.audioAvailable)
         note = "No sound: " + toJuce (view.audioText);
-    else if (view.mayRingOut && view.state != State::playing)
+    else if (view.mayRingOut && ! running)
         note = view.state == State::paused ? "Playback held; sound may ring out. Silence cuts it." : "Stopped; sound may ring out. Silence cuts it.";
     else if (view.state == State::completed)
         note = "End of song.";
@@ -153,7 +168,40 @@ void MainComponent::setTransport (const TransportView& view)
     transportNote_.setText (note, juce::dontSendNotification);
     transportNote_.setColour (juce::Label::textColourId, view.audioAvailable ? juce::Colours::lightgrey : juce::Colours::orange);
 
-    roll_.setPlayhead (view.positionSeconds, view.state == State::playing);
+    roll_.setPlayhead (view.positionSeconds, running);
+}
+
+void MainComponent::setPractice (const PracticeView& view)
+{
+    practiceToggle_.setToggleState (view.practising, juce::dontSendNotification);
+    modeBox_.setSelectedId (view.mode + 1, juce::dontSendNotification);
+    keyboard_.setPracticePitches (view.practising ? view.required : std::vector<std::uint8_t> {}, view.wrong);
+
+    juce::String text;
+    juce::Colour colour = juce::Colours::white;
+    if (view.practising && song_)
+    {
+        if (view.waiting)
+        {
+            text = "Waiting for: " + toJuce (view.requiredText);
+            colour = juce::Colour (0xfff2c94c);
+        }
+        else if (view.gateCount == 0)
+            text = "This hand has no notes in the song";
+        else if (view.gateNumber == 0)
+            text = "All your notes played";
+        else if (view.accompanimentOnly)
+            text = "Accompaniment only";
+        else
+            text = "Next: " + toJuce (view.requiredText);
+    }
+    waitingLabel_.setText (text, juce::dontSendNotification);
+    waitingLabel_.setColour (juce::Label::textColourId, colour);
+    gateLabel_.setText (view.practising && view.gateCount > 0
+                            ? "Step " + juce::String (static_cast<int> (view.gateNumber == 0 ? view.gateCount : view.gateNumber))
+                                  + " of " + juce::String (static_cast<int> (view.gateCount))
+                            : juce::String(),
+                        juce::dontSendNotification);
 }
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
@@ -334,6 +382,15 @@ void MainComponent::resized()
     volume_.setBounds (transportBar.removeFromRight (160));
     volumeLabel_.setBounds (transportBar.removeFromRight (60));
     transportNote_.setBounds (transportBar);
+
+    area.removeFromTop (6);
+    auto practiceBar = area.removeFromTop (30);
+    practiceToggle_.setBounds (practiceBar.removeFromLeft (230));
+    practiceBar.removeFromLeft (6);
+    modeBox_.setBounds (practiceBar.removeFromLeft (130));
+    practiceBar.removeFromLeft (12);
+    gateLabel_.setBounds (practiceBar.removeFromRight (200));
+    waitingLabel_.setBounds (practiceBar);
 
     area.removeFromTop (6);
     keyboard_.setBounds (area.removeFromBottom (64));

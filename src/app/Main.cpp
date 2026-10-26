@@ -1,7 +1,9 @@
 #include "app/AppPaths.h"
 #include "app/AudioService.h"
+#include "app/LessonController.h"
 #include "app/MidiInputService.h"
 #include "app/SongLoader.h"
+#include "core/NoteName.h"
 #include "core/Utf8Path.h"
 #include "diagnostics/RotatingLog.h"
 #include "diagnostics/SessionReport.h"
@@ -19,6 +21,16 @@ namespace pianoassist::app
 namespace
 {
 using diagnostics::LogLevel;
+
+lesson::PracticeMode toPracticeMode (int index)
+{
+    switch (index)
+    {
+        case 1: return lesson::PracticeMode::rightHand;
+        case 2: return lesson::PracticeMode::leftHand;
+        default: return lesson::PracticeMode::bothHands;
+    }
+}
 
 // Used only by the crash/terminate handlers, which cannot capture state.
 diagnostics::RotatingLog* crashLog = nullptr;
@@ -195,20 +207,13 @@ public:
                 log_->write (LogLevel::info, "ui", visible ? "Part shown" : "Part hidden", { { "part", std::to_string (part + 1) } });
             },
             [this] (double pixelsPerSecond) { settings_.visual.pixelsPerSecond = pixelsPerSecond; },
-            [this] { playPause(); },
-            [this] {
-                logTransport ("User pressed Stop");
-                audio_->stop();
-            },
-            [this] {
-                logTransport ("User pressed Silence");
-                audio_->silence();
-            },
-            [this] (double seconds) {
-                log_->write (LogLevel::info, "transport", "User seeked", { { "to", juce::String (seconds, 2).toStdString() } });
-                audio_->seek (seconds);
-            },
+            [this] { lesson_->playPause(); },
+            [this] { lesson_->stop(); },
+            [this] { lesson_->silence(); },
+            [this] (double seconds) { lesson_->seek (seconds); },
             [this] (float gain) { audio_->setGain (gain); },
+            [this] (bool practising) { lesson_->setPractising (practising); },
+            [this] (int mode) { lesson_->setMode (toPracticeMode (mode)); },
         });
         content_ = content;
         content->setPixelsPerSecond (settings_.visual.pixelsPerSecond);
@@ -222,6 +227,9 @@ public:
 
         audio_ = std::make_unique<AudioService> (*log_);
         audioError_ = audio_->start();
+        lesson_ = std::make_unique<LessonController> (*log_, *audio_, midi_->lessonQueue(), settings_.practiceProfile,
+                                                      settings_.calibration.inputOffsetMs);
+        lesson_->start();
         content->setVolume (0.8f);
         startTimerHz (30);
         log_->write (LogLevel::info, "startup", "Startup complete");
@@ -243,6 +251,7 @@ public:
                 log_->write (LogLevel::error, "settings", error);
         stopTimer();
         chooser_.reset();
+        lesson_.reset();
         audio_.reset();
         midi_.reset();
         window_.reset();
@@ -292,47 +301,16 @@ private:
             return;
         }
         song_ = std::move (song).value();
-        audio_->loadSong (*song_);
+        lesson_->loadSong (song_);
         content_->setSong (std::make_shared<const ui::PianoRollView> (
             makePianoRollView (*song_, file.getFileNameWithoutExtension().toStdString())));
         log_->write (LogLevel::info, "song", "Song shown in piano roll");
-    }
-
-    void playPause()
-    {
-        const auto snap = audio_->snapshot();
-        if (snap.state == audio::PlaybackState::playing)
-        {
-            logTransport ("User pressed Pause");
-            audio_->pause();
-        }
-        else
-        {
-            logTransport ("User pressed Play");
-            audio_->play();
-        }
-    }
-
-    void logTransport (const char* message)
-    {
-        const auto snap = audio_->snapshot();
-        log_->write (LogLevel::info, "transport", message,
-                     { { "position", juce::String (snap.positionSeconds, 2).toStdString() },
-                       { "state", audio::toString (snap.state) } });
     }
 
     void timerCallback() override
     {
         audio_->collectGarbage();
         const auto snap = audio_->snapshot();
-        if (snap.state != lastState_)
-        {
-            log_->write (LogLevel::info, "transport", "Playback state changed",
-                         { { "from", audio::toString (lastState_) },
-                           { "to", audio::toString (snap.state) },
-                           { "position", juce::String (snap.positionSeconds, 2).toStdString() } });
-            lastState_ = snap.state;
-        }
 
         ui::TransportView view;
         using S = ui::TransportView::State;
@@ -345,6 +323,7 @@ private:
                 case audio::PlaybackState::playing:   view.state = S::playing; break;
                 case audio::PlaybackState::paused:    view.state = S::paused; break;
                 case audio::PlaybackState::completed: view.state = S::completed; break;
+                case audio::PlaybackState::waitingForGate: view.state = S::waiting; break;
             }
         view.positionSeconds = snap.positionSeconds;
         view.durationSeconds = song_ != nullptr ? song_->durationSeconds : 0.0;
@@ -352,6 +331,21 @@ private:
         view.audioText = audioError_.empty() ? "Built-in synth" : audioError_;
         view.mayRingOut = snap.activeVoices > 0;
         content_->setTransport (view);
+
+        const auto practice = lesson_->snapshot();
+        ui::PracticeView pv;
+        pv.practising = practice.practising;
+        pv.mode = static_cast<int> (practice.mode);
+        pv.waiting = practice.waiting;
+        pv.accompanimentOnly = practice.accompanimentOnly;
+        pv.required = practice.missing;
+        pv.matched = practice.matched;
+        pv.wrong = practice.recentWrong;
+        pv.gateNumber = practice.gateNumber;
+        pv.gateCount = practice.gateCount;
+        for (const auto pitch : practice.missing)
+            pv.requiredText += (pv.requiredText.empty() ? "" : " ") + noteName (pitch);
+        content_->setPractice (pv);
     }
 
     void rememberInput (const midi_io::MidiDeviceInfo& device)
@@ -374,8 +368,8 @@ private:
     juce::File lastFolder_ = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
     std::shared_ptr<const timeline::Song> song_;
     std::unique_ptr<AudioService> audio_;
+    std::unique_ptr<LessonController> lesson_;
     std::string audioError_;
-    audio::PlaybackState lastState_ = audio::PlaybackState::stopped;
 };
 
 } // namespace pianoassist::app

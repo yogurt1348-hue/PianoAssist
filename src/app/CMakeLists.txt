@@ -9,6 +9,7 @@ target_sources(PianoAssistApp PRIVATE
     AppPaths.cpp
     MidiInputService.cpp
     SongLoader.cpp
+    LessonController.cpp
     AudioService.cpp
     ${PROJECT_SOURCE_DIR}/src/audio/InternalSynthRenderer.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/MainComponent.cpp
@@ -30,6 +31,7 @@ target_link_libraries(PianoAssistApp
         PianoAssist::midi_io
         PianoAssist::timeline
         PianoAssist::audio
+        PianoAssist::lesson_engine
         juce::juce_gui_basics
         juce::juce_audio_devices
     PUBLIC

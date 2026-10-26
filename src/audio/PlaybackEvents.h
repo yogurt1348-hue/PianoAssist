@@ -3,6 +3,7 @@
 #include "timeline/Song.h"
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace pianoassist::audio
@@ -26,6 +27,8 @@ struct PlaybackEventList
     std::uint64_t id = 0; ///< lets the control thread see which list the audio thread uses
 };
 
-PlaybackEventList buildPlaybackEvents (const timeline::Song& song, std::uint64_t id);
+/** includeRole decides which notes sound; sustain events always pass. */
+PlaybackEventList buildPlaybackEvents (const timeline::Song& song, std::uint64_t id,
+                                       const std::function<bool (timeline::NoteRole)>& includeRole = {});
 
 } // namespace pianoassist::audio

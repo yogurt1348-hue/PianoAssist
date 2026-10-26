@@ -12,6 +12,7 @@ struct TransportView
         noSong,
         stopped,
         playing,
+        waiting, ///< held at a practice gate
         paused,
         completed,
     };

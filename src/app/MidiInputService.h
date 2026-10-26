@@ -38,6 +38,10 @@ public:
     void setChoiceListener (ChoiceListener listener) { choiceListener_ = std::move (listener); }
 
     void start();
+
+    using InputQueue = SpscQueue<midi_io::InputEvent, 4096>;
+    /** Second copy of every input event for the lesson thread (its only consumer). */
+    InputQueue& lessonQueue() noexcept { return lessonQueue_; }
     void selectByUser (const std::string& identifier);
     void rescan (const char* reason);
 
@@ -65,7 +69,8 @@ private:
     bool deviceLost_ = false;
     bool openFailed_ = false;
 
-    SpscQueue<midi_io::InputEvent, 4096> queue_;
+    InputQueue queue_;
+    InputQueue lessonQueue_;
     std::uint64_t sequence_ = 0; // written only by the device callback thread
     midi_io::InputMonitor monitor_;
 

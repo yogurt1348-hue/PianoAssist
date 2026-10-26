@@ -4,6 +4,7 @@
 #include "ui/KeyboardStrip.h"
 #include "ui/PianoRollComponent.h"
 #include "ui/PianoRollView.h"
+#include "ui/PracticeView.h"
 #include "ui/TransportView.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -34,6 +35,8 @@ public:
         std::function<void()> silence;
         std::function<void (double seconds)> seek;
         std::function<void (float gain)> volumeChanged;
+        std::function<void (bool practising)> practiceChanged;
+        std::function<void (int mode)> modeChanged;
     };
 
     explicit MainComponent (Intents intents);
@@ -43,6 +46,7 @@ public:
     void setSongError (const std::string& message);
     void setPixelsPerSecond (double pixelsPerSecond) { roll_.setPixelsPerSecond (pixelsPerSecond); }
     void setTransport (const TransportView& view);
+    void setPractice (const PracticeView& view);
     void setVolume (float gain) { volume_.setValue (gain, juce::dontSendNotification); }
 
     bool keyPressed (const juce::KeyPress& key) override;
@@ -91,6 +95,11 @@ private:
     juce::Label timeLabel_;
     juce::Label transportNote_;
     TransportView transport_;
+
+    juce::ToggleButton practiceToggle_ { "Practice: wait for my notes" };
+    juce::ComboBox modeBox_;
+    juce::Label waitingLabel_;
+    juce::Label gateLabel_;
 
     PianoRollComponent roll_;
     KeyboardStrip keyboard_;

@@ -33,7 +33,7 @@ MidiInputService::~MidiInputService()
     closeDevice ("application exit");
 }
 
-std::int64_t MidiInputService::nowMicros() noexcept
+std::int64_t MidiInputService::nowMicros() noexcept // same clock as AudioService::nowMicros
 {
     return std::chrono::duration_cast<std::chrono::microseconds> (Clock::now().time_since_epoch()).count();
 }
@@ -188,7 +188,10 @@ void MidiInputService::handleIncomingMidiMessage (juce::MidiInput*, const juce::
     if (const auto event = midi_io::normalizeMidiMessage (message.getRawData(),
                                                          static_cast<std::size_t> (message.getRawDataSize()),
                                                          timestamp, sequence_++))
+    {
         queue_.push (*event);
+        lessonQueue_.push (*event);
+    }
 }
 
 void MidiInputService::drainQueue()

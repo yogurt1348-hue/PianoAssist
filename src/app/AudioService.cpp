@@ -56,9 +56,20 @@ void AudioService::send (const audio::PlaybackCommand& command, const char* what
         log_.write (LogLevel::error, "audio", "Playback command queue full; command dropped", { { "command", what } });
 }
 
-void AudioService::loadSong (const timeline::Song& song)
+std::int64_t AudioService::nowMicros() noexcept
 {
-    auto list = std::make_shared<const audio::PlaybackEventList> (audio::buildPlaybackEvents (song, nextListId_++));
+    return std::chrono::duration_cast<std::chrono::microseconds> (std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+void AudioService::setGate (double boundarySeconds)
+{
+    send ({ audio::PlaybackCommand::Type::setGate, boundarySeconds }, "gate");
+}
+
+void AudioService::loadSong (const timeline::Song& song, const std::function<bool (timeline::NoteRole)>& include)
+{
+    std::scoped_lock lock (listsMutex_);
+    auto list = std::make_shared<const audio::PlaybackEventList> (audio::buildPlaybackEvents (song, nextListId_++, include));
     if (current_)
         retired_.push_back (current_);
     current_ = list;
@@ -79,16 +90,37 @@ AudioService::Snapshot AudioService::snapshot() const
     Snapshot s;
     s.state = static_cast<audio::PlaybackState> (state_.load());
     s.positionSeconds = position_.load();
-    s.durationSeconds = current_ ? current_->durationSeconds : 0.0;
+    {
+        std::scoped_lock lock (listsMutex_);
+        s.durationSeconds = current_ ? current_->durationSeconds : 0.0;
+    }
     s.activeVoices = activeVoices_.load();
     s.deviceOpen = deviceOpen_.load();
+    // Seqlock read: the block timing fields are written together by the audio
+    // thread and must be read as one consistent set.
+    for (;;)
+    {
+        const auto before = blockSeq_.load (std::memory_order_acquire);
+        if ((before & 1u) != 0)
+            continue;
+        s.blockStartPosition = blockStartPosition_.load (std::memory_order_relaxed);
+        s.blockStartMicros = blockStartMicros_.load (std::memory_order_relaxed);
+        s.gateArrivals = gateArrivals_.load (std::memory_order_relaxed);
+        s.arrivalMicros = arrivalMicros_.load (std::memory_order_relaxed);
+        std::atomic_thread_fence (std::memory_order_acquire);
+        if (blockSeq_.load (std::memory_order_relaxed) == before)
+            break;
+    }
     return s;
 }
 
 void AudioService::collectGarbage()
 {
-    if (current_ && activeListId_.load() == current_->id)
-        retired_.clear();
+    {
+        std::scoped_lock lock (listsMutex_);
+        if (current_ && activeListId_.load() == current_->id)
+            retired_.clear();
+    }
     if (errorPending_.exchange (false))
         log_.write (LogLevel::error, "audio", "Audio device reported an error");
 }
@@ -123,10 +155,23 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
                                                      int numSamples, const juce::AudioIODeviceCallbackContext&)
 {
     // Audio thread: no allocation, locks, logging or file access.
+    const auto blockStart = nowMicros();
     while (const auto command = commands_.pop())
         engine_.handle (*command, synth_);
 
+    const auto startPosition = engine_.positionSeconds();
     engine_.process (synth_, { outputs, numOutputs, numSamples });
+    const auto seq = blockSeq_.load (std::memory_order_relaxed);
+    blockSeq_.store (seq + 1, std::memory_order_relaxed);
+    std::atomic_thread_fence (std::memory_order_release);
+    if (engine_.gateArrivals() != gateArrivals_.load (std::memory_order_relaxed))
+    {
+        arrivalMicros_.store (blockStart, std::memory_order_relaxed);
+        gateArrivals_.store (engine_.gateArrivals(), std::memory_order_relaxed);
+    }
+    blockStartPosition_.store (startPosition, std::memory_order_relaxed);
+    blockStartMicros_.store (blockStart, std::memory_order_relaxed);
+    blockSeq_.store (seq + 2, std::memory_order_release);
 
     gain_.setTargetValue (targetGain_.load (std::memory_order_relaxed));
     for (int i = 0; i < numSamples; ++i)
