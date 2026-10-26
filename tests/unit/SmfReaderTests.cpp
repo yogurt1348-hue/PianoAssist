@@ -184,3 +184,14 @@ TEST_CASE ("Format 2 and truncated files are rejected by the full parser")
     CHECK_FALSE (readSmf (test::readFixture ("unsupported_format2.mid")).isOk());
     CHECK_FALSE (readSmf (test::readFixture ("malformed_truncated_track.mid")).isOk());
 }
+
+TEST_CASE ("Bar lines follow tempo changes")
+{
+    const auto song = songFrom ("format1_tempo_changes.mid");
+    const auto bars = barStartSeconds (song);
+    // 4/4, two bars of notes: bar 1 at 120 BPM (2 s), bar 2 at 60 BPM (4 s).
+    REQUIRE (bars.size() == 2);
+    CHECK (bars[0] == Approx (0.0));
+    CHECK (bars[1] == Approx (2.0));
+    CHECK (song.durationSeconds == Approx (6.0));
+}

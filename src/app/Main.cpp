@@ -1,5 +1,6 @@
 #include "app/AppPaths.h"
 #include "app/MidiInputService.h"
+#include "app/SongLoader.h"
 #include "core/Utf8Path.h"
 #include "diagnostics/RotatingLog.h"
 #include "diagnostics/SessionReport.h"
@@ -157,7 +158,7 @@ public:
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
     bool moreThanOneInstanceAllowed() override { return false; }
 
-    void initialise (const juce::String&) override
+    void initialise (const juce::String& commandLine) override
     {
         diagnostics::RotatingLog::Options options;
         options.directory = logDirectory();
@@ -184,7 +185,18 @@ public:
                 log_->write (LogLevel::info, "ui", "User opened the log folder");
                 juce::File (juce::String::fromUTF8 (pathToUtf8 (logDirectory()).c_str())).startAsProcess();
             },
+            [this] { chooseMidiFile(); },
+            [this] (const juce::File& file) {
+                log_->write (LogLevel::info, "ui", "User dropped a file on the window");
+                openSong (file);
+            },
+            [this] (std::size_t part, bool visible) {
+                log_->write (LogLevel::info, "ui", visible ? "Part shown" : "Part hidden", { { "part", std::to_string (part + 1) } });
+            },
+            [this] (double pixelsPerSecond) { settings_.visual.pixelsPerSecond = pixelsPerSecond; },
         });
+        content_ = content;
+        content->setPixelsPerSecond (settings_.visual.pixelsPerSecond);
         midi_->setViewListener ([content] (const ui::InputMonitorView& view) { content->setInputMonitor (view); });
         midi_->setChoiceListener ([this] (const midi_io::MidiDeviceInfo& device) { rememberInput (device); });
 
@@ -193,12 +205,23 @@ public:
 
         midi_->start();
         log_->write (LogLevel::info, "startup", "Startup complete");
+
+        const auto argument = commandLine.unquoted().trim();
+        if (argument.isNotEmpty() && juce::File::isAbsolutePath (argument) && juce::File (argument).existsAsFile())
+        {
+            log_->write (LogLevel::info, "startup", "Opening file from the command line");
+            openSong (juce::File (argument));
+        }
     }
 
     void shutdown() override
     {
         if (log_ != nullptr)
             log_->write (LogLevel::info, "session", "Shutdown begin");
+        if (log_ != nullptr)
+            if (const auto error = settings::saveToFile (settingsFile(), settings_); ! error.empty())
+                log_->write (LogLevel::error, "settings", error);
+        chooser_.reset();
         midi_.reset();
         window_.reset();
         if (log_ != nullptr)
@@ -218,6 +241,40 @@ public:
     }
 
 private:
+    void chooseMidiFile()
+    {
+        log_->write (LogLevel::info, "ui", "User pressed Open MIDI file");
+        chooser_ = std::make_unique<juce::FileChooser> ("Open a MIDI file", lastFolder_, "*.mid;*.midi;*.kar");
+        chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                               [this] (const juce::FileChooser& chooser) {
+                                   const auto file = chooser.getResult();
+                                   if (file == juce::File())
+                                   {
+                                       log_->write (LogLevel::info, "ui", "Open MIDI file cancelled");
+                                       return;
+                                   }
+                                   openSong (file);
+                               });
+    }
+
+    void openSong (const juce::File& file)
+    {
+        lastFolder_ = file.getParentDirectory();
+        const auto path = pathFromUtf8 (file.getFullPathName().toStdString());
+        auto song = loadSong (path, *log_);
+        if (! song)
+        {
+            content_->setSongError ("Could not open " + file.getFileName().toStdString() + ": " + song.error());
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Could not open the MIDI file",
+                                                    file.getFileName() + "\n\n" + juce::String::fromUTF8 (song.error().c_str()));
+            return;
+        }
+        song_ = std::move (song).value();
+        content_->setSong (std::make_shared<const ui::PianoRollView> (
+            makePianoRollView (*song_, file.getFileNameWithoutExtension().toStdString())));
+        log_->write (LogLevel::info, "song", "Song shown in piano roll");
+    }
+
     void rememberInput (const midi_io::MidiDeviceInfo& device)
     {
         if (settings_.midiInput.deviceId == device.identifier && settings_.midiInput.lastSeenName == device.name)
@@ -233,6 +290,10 @@ private:
     settings::Settings settings_;
     std::unique_ptr<MidiInputService> midi_;
     std::unique_ptr<MainWindow> window_;
+    ui::MainComponent* content_ = nullptr; // owned by window_
+    std::unique_ptr<juce::FileChooser> chooser_;
+    juce::File lastFolder_ = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
+    std::shared_ptr<const timeline::Song> song_;
 };
 
 } // namespace pianoassist::app

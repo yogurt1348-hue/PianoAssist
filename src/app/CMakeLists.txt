@@ -8,7 +8,10 @@ target_sources(PianoAssistApp PRIVATE
     Main.cpp
     AppPaths.cpp
     MidiInputService.cpp
-    ${PROJECT_SOURCE_DIR}/src/ui/MainComponent.cpp)
+    SongLoader.cpp
+    ${PROJECT_SOURCE_DIR}/src/ui/MainComponent.cpp
+    ${PROJECT_SOURCE_DIR}/src/ui/PianoRollComponent.cpp
+    ${PROJECT_SOURCE_DIR}/src/ui/KeyboardStrip.cpp)
 
 target_compile_definitions(PianoAssistApp PRIVATE
     JUCE_WEB_BROWSER=0
@@ -23,6 +26,7 @@ target_link_libraries(PianoAssistApp
         PianoAssist::diagnostics
         PianoAssist::transport
         PianoAssist::midi_io
+        PianoAssist::timeline
         juce::juce_gui_basics
         juce::juce_audio_devices
     PUBLIC

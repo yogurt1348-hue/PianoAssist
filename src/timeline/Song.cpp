@@ -189,6 +189,25 @@ std::vector<Part> inferParts (const smf::SmfFile& file)
     return parts;
 }
 
+std::vector<double> barStartSeconds (const Song& song, std::size_t maxBars)
+{
+    std::vector<double> bars;
+    const auto ppq = static_cast<double> (song.tempoMap.ticksPerQuarter());
+    const auto endTick = song.tempoMap.secondsToTick (song.durationSeconds);
+
+    for (std::size_t i = 0; i < song.timeSignatures.size() && bars.size() < maxBars; ++i)
+    {
+        const auto& ts = song.timeSignatures[i];
+        const double barTicks = ppq * 4.0 * ts.numerator / ts.denominator;
+        const double segmentEnd = i + 1 < song.timeSignatures.size()
+                                      ? static_cast<double> (song.timeSignatures[i + 1].tick)
+                                      : endTick;
+        for (double tick = static_cast<double> (ts.tick); tick < segmentEnd - 0.5 && bars.size() < maxBars; tick += barTicks)
+            bars.push_back (song.tempoMap.tickToSeconds (static_cast<std::int64_t> (tick + 0.5)));
+    }
+    return bars;
+}
+
 Result<Song> buildSong (const smf::SmfFile& file)
 {
     using R = Result<Song>;

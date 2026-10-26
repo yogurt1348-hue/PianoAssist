@@ -50,6 +50,9 @@ Decisions taken while implementing, per `11-claude-workflow.md`. Each one can be
 | 2026-10-26 | 1 | All channels are accepted; a channel filter is not exposed yet. | Brief: channel configurable/auto-accepted initially. |
 | 2026-10-26 | 1 | Automatic selection: remembered identifier, then remembered name (other USB port), then the first device only when nothing was ever chosen. A missing remembered device is never silently replaced. | Avoids latching onto a loopback or another keyboard. |
 | 2026-10-26 | 1 | Log level is `debug` in every build: each note, pedal change, device appearance/disappearance, user action, startup step and crash (with stack) is logged. Files rotate at 5 MiB, 5 archives. | Owner asked for diagnosis from the log alone. |
+| 2026-10-26 | 2 | A source part is a (track, channel) pair. Role inference order: channel 10 → backing; track name (right/RH/treble, left/LH, drum/bass/guitar/strings/...) → that role; non-piano program (GM > 8) → backing; one remaining piano part → split at C4 (below C4 left hand); two or more → higher average pitch right, next left, rest backing. | Brief's split heuristic; inference shown in the part list and log because it can be wrong. |
+| 2026-10-26 | 2 | Overlapping repeats of one pitch on one channel pair first-on-first-off. | Standard sequencer behaviour; predictable. |
+| 2026-10-26 | 2 | Piano roll: pitch on the vertical axis with note names in a left gutter, time left to right, 88-key strip at the bottom lighting up live input. | Brief's horizontal roll with keyboard at bottom. |
 
 ## Open questions added during implementation
 

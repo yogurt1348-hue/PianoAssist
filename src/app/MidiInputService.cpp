@@ -293,7 +293,8 @@ void MidiInputService::publishView()
 
     if (const auto& last = monitor_.lastNote())
         view.lastNote = noteName (last->pitch) + "  vel " + std::to_string (last->velocity);
-    for (const auto pitch : monitor_.heldPitches())
+    view.heldPitches = monitor_.heldPitches();
+    for (const auto pitch : view.heldPitches)
         view.heldNotes += (view.heldNotes.empty() ? "" : " ") + noteName (pitch);
     view.sustainDown = monitor_.sustainDown();
     view.eventsPerSecond = monitor_.eventsPerSecond (nowMicros());

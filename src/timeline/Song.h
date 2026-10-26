@@ -69,6 +69,10 @@ struct Song
     the inferred part assignments. Never assumes a fixed tempo. */
 Result<Song> buildSong (const smf::SmfFile& file);
 
+/** Start time of every bar from the time signatures and tempo map, up to the
+    end of the song. Bounded so a corrupt file cannot produce millions. */
+std::vector<double> barStartSeconds (const Song& song, std::size_t maxBars = 20'000);
+
 /** Infers each part's assignment. Exposed for tests. */
 std::vector<Part> inferParts (const smf::SmfFile& file);
 

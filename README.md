@@ -6,7 +6,7 @@ The product brief and phase plan live in [`docs/plan/`](docs/plan/README.md). Im
 
 ## Status
 
-Phase 0 (foundation) is done. Phase 1 (USB MIDI input) is in progress: the app lists MIDI inputs, opens the piano automatically, shows a live monitor of notes and the sustain pedal, and recovers when the cable is unplugged and plugged back. Manual check: [`docs/manual-checks/phase-1-midi-input.md`](docs/manual-checks/phase-1-midi-input.md). Song loading and practice arrive in phases 2 to 5.
+Phase 0 (foundation) is done. Phase 1 (USB MIDI input) is in progress: the app lists MIDI inputs, opens the piano automatically, shows a live monitor of notes and the sustain pedal, and recovers when the cable is unplugged and plugged back. Manual check: [`docs/manual-checks/phase-1-midi-input.md`](docs/manual-checks/phase-1-midi-input.md). Phase 2 (song loading and playback) is in progress: MIDI files (format 0/1) open from a button, drag and drop or the command line, and are drawn on a scrollable, zoomable piano roll with inferred hand roles. Playback and practice arrive next.
 
 ## Requirements
 
@@ -55,8 +55,8 @@ Logs record every startup step, the app and Windows versions, MIDI devices appea
 | Folder | Module |
 | --- | --- |
 | `src/core` | UTF-8 paths, bounded file reading, `Result` |
-| `src/smf` | Standard MIDI File reading, tempo map |
-| `src/timeline` | Immutable normalized note model |
+| `src/smf` | Standard MIDI File parser (format 0/1), tempo map |
+| `src/timeline` | Immutable normalized note model, song builder, hand-role inference |
 | `src/transport` | Transport states (state machine arrives in phase 3) |
 | `src/lesson_engine` | Practice profile and calibration (gate engine arrives in phase 3) |
 | `src/midi_io` | Input normalization, monitor state, device selection (JUCE adapter in `src/app`) |

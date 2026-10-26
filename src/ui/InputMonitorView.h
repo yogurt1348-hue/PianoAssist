@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,7 @@ struct InputMonitorView
 
     std::string lastNote;   ///< e.g. "C4  velocity 87"
     std::string heldNotes;  ///< e.g. "C4 E4 G4"
+    std::vector<std::uint8_t> heldPitches;
     bool sustainDown = false;
     double eventsPerSecond = 0.0;
     unsigned long long totalNoteOns = 0;
