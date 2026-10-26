@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   windows:
     name: Windows x64 (${{ matrix.config }})
@@ -22,13 +25,42 @@ jobs:
         run: cmake --build --preset windows-x64-${{ matrix.config == 'Debug' && 'debug' || 'release' }} --parallel
       - name: Test
         run: ctest --preset windows-x64-${{ matrix.config == 'Debug' && 'debug' || 'release' }}
+      - name: Package app
+        shell: pwsh
+        run: |
+          $exe = "build/windows-x64/src/app/PianoAssistApp_artefacts/${{ matrix.config }}/PianoAssist.exe"
+          Compress-Archive -Path $exe -DestinationPath "PianoAssist-windows-x64-${{ matrix.config }}.zip"
       - name: Upload app
-        if: matrix.config == 'Release'
         uses: actions/upload-artifact@v4
         with:
-          name: PianoAssist-windows-x64
-          path: build/windows-x64/src/app/PianoAssistApp_artefacts/Release/PianoAssist.exe
+          name: PianoAssist-windows-x64-${{ matrix.config }}
+          path: PianoAssist-windows-x64-${{ matrix.config }}.zip
           if-no-files-found: error
+
+  test-build-release:
+    name: Publish test build (pre-release)
+    # Only for pushes to work branches: gives a direct download link for
+    # manual testing on Windows. Never marked as a real release.
+    if: github.event_name == 'push' && startsWith(github.ref_name, 'claude/')
+    needs: windows
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: PianoAssist-windows-x64-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: test-build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Test build ${{ github.run_number }} (${{ github.ref_name }})
+          prerelease: true
+          body: |
+            Automatic test build from `${{ github.ref_name }}` at ${{ github.sha }}.
+            Not a release. Unzip and run PianoAssist.exe (Release is the one to test; Debug is slower and for diagnosis).
+          files: PianoAssist-windows-x64-*.zip
 
   tests-linux:
     name: Domain tests (Linux, no JUCE)
