@@ -17,6 +17,7 @@ enum class PlaybackState : std::uint8_t
     playing,
     paused,
     completed,
+    waitingForGate, ///< held at a gate boundary until the learner plays it
 };
 
 const char* toString (PlaybackState state) noexcept;
@@ -33,6 +34,7 @@ struct PlaybackCommand
         seek,      ///< value = seconds
         silence,   ///< panic: release and reset voices now
         setGain,   ///< value = linear gain
+        setGate,   ///< value = boundary seconds, negative = no gate; releases a hold when moved past it
     };
 
     Type type = Type::stop;
@@ -62,6 +64,8 @@ public:
     std::uint64_t activeListId() const noexcept { return events_ != nullptr ? events_->id : 0; }
     std::size_t soundingNoteCount() const noexcept;
     std::size_t droppedEventCount() const noexcept { return dropped_; }
+    /** Increments every time playback arrives at a gate and holds. */
+    std::uint64_t gateArrivals() const noexcept { return gateArrivals_; }
 
 private:
     void releaseOwned (int sampleOffset) noexcept;
@@ -75,6 +79,9 @@ private:
     double anchorSeconds_ = 0.0;      ///< song position when anchorFrames_ was zero
     std::int64_t framesSinceAnchor_ = 0;
     std::size_t cursor_ = 0;          ///< next event to schedule
+
+    double gateSeconds_ = -1.0; ///< hold before events at this time; negative = none
+    std::uint64_t gateArrivals_ = 0;
 
     std::array<std::bitset<128>, 16> owned_ {};
     std::bitset<16> sustainOwned_ {};

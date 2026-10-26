@@ -15,6 +15,7 @@ const char* toString (PlaybackState state) noexcept
         case PlaybackState::playing:   return "playing";
         case PlaybackState::paused:    return "paused";
         case PlaybackState::completed: return "completed";
+        case PlaybackState::waitingForGate: return "waiting for gate";
     }
     return "stopped";
 }
@@ -102,7 +103,7 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
             break;
 
         case Type::pause:
-            if (state_ == PlaybackState::playing)
+            if (state_ == PlaybackState::playing || state_ == PlaybackState::waitingForGate)
             {
                 releaseOwned (0);
                 state_ = PlaybackState::paused;
@@ -120,7 +121,7 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
             releaseOwned (0);
             const double limit = events_ != nullptr ? events_->durationSeconds : 0.0;
             moveTo (std::clamp (command.value, 0.0, limit));
-            if (state_ == PlaybackState::completed)
+            if (state_ == PlaybackState::completed || state_ == PlaybackState::waitingForGate)
                 state_ = PlaybackState::paused;
             break;
         }
@@ -134,6 +135,13 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
 
         case Type::setGain:
             break; // applied by the audio callback owner
+
+        case Type::setGate:
+            gateSeconds_ = command.value;
+            if (state_ == PlaybackState::waitingForGate
+                && (gateSeconds_ < 0.0 || gateSeconds_ > positionSeconds() + 1.0e-9))
+                state_ = PlaybackState::playing; // gate passed: resume from the boundary
+            break;
     }
 }
 
@@ -142,12 +150,26 @@ void PlaybackEngine::process (IInstrumentRenderer& renderer, RenderBlock block) 
     if (state_ == PlaybackState::playing && events_ != nullptr && block.numFrames > 0)
     {
         const auto& list = events_->events;
-        const auto blockEndFrame = framesSinceAnchor_ + block.numFrames;
         // Frames are counted from the anchor and rounded to the nearest
         // sample, so scheduling is identical for every buffer size.
         const auto frameOf = [this] (double seconds) {
             return static_cast<std::int64_t> (std::llround ((seconds - anchorSeconds_) * sampleRate_));
         };
+
+        // A gate inside this block cuts it short: events at the gate itself
+        // wait until the learner passes it.
+        std::int64_t framesToPlay = block.numFrames;
+        bool reachesGate = false;
+        if (gateSeconds_ >= 0.0)
+        {
+            const auto gateFrame = std::max (frameOf (gateSeconds_), framesSinceAnchor_);
+            if (gateFrame < framesSinceAnchor_ + block.numFrames)
+            {
+                framesToPlay = gateFrame - framesSinceAnchor_;
+                reachesGate = true;
+            }
+        }
+        const auto blockEndFrame = framesSinceAnchor_ + framesToPlay;
 
         while (cursor_ < list.size() && frameOf (list[cursor_].seconds) < blockEndFrame)
         {
@@ -175,8 +197,18 @@ void PlaybackEngine::process (IInstrumentRenderer& renderer, RenderBlock block) 
             queueEvent ({ offset, e.status, e.data1, e.data2 });
         }
 
-        framesSinceAnchor_ += block.numFrames;
-        if (positionSeconds() >= events_->durationSeconds && cursor_ >= list.size())
+        framesSinceAnchor_ += framesToPlay;
+        if (reachesGate)
+        {
+            // Hold exactly at the boundary. Owned notes and pedal are released
+            // so voices decay naturally; future events are not scheduled.
+            releaseOwned (static_cast<int> (std::min<std::int64_t> (framesToPlay, block.numFrames - 1)));
+            anchorSeconds_ = gateSeconds_;
+            framesSinceAnchor_ = 0;
+            state_ = PlaybackState::waitingForGate;
+            ++gateArrivals_;
+        }
+        else if (positionSeconds() >= events_->durationSeconds && cursor_ >= list.size())
         {
             releaseOwned (block.numFrames - 1);
             state_ = PlaybackState::completed;

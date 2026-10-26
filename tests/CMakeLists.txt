@@ -10,6 +10,7 @@ add_executable(pianoassist_tests
     unit/MidiInputTests.cpp
     unit/SmfReaderTests.cpp
     unit/PlaybackEngineTests.cpp
+    unit/PracticeTests.cpp
     unit/Fixtures.cpp)
 
 target_include_directories(pianoassist_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)
