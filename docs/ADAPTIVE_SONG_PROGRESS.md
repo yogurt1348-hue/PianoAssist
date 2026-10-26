@@ -1,6 +1,6 @@
 # Adaptive Song Mode — Progress (source of truth)
 
-_Last updated: 2026-10-10 (cloud session)._
+_Last updated: 2026-10-26 (cloud session)._
 
 ## UPSTREAM BASE
 
@@ -65,7 +65,20 @@ _Last updated: 2026-10-10 (cloud session)._
 
 ## CURRENT
 
-* Waiting for Windows validation (MSVC build + real keyboard + real audio).
+* Portable Windows test build for the user's hardware run
+  (`.github/workflows/windows-test-build.yml` → artifact
+  `PianoAssist-<version>-<commit>`; `scripts/package-portable.ps1`):
+  Release + FluidSynth (vcpkg), MSVC runtime app-local, GeneralUser GS v2.0.3
+  (pinned commit + SHA-256) with its license, two demo songs
+  (`adaptive-demo --right-hand-only` added), Russian instructions
+  (`docs/TEST_BUILD_RU.md`) and a 10–15 min manual test plan
+  (`docs/MANUAL_TEST_RU.md`).
+* Diagnostics: the previous run's log is kept (`cadenza-previous.log`); the
+  Adaptive window has "Open log folder" and "Save log to Desktop".
+* MIDI hot-plug fix: a disconnected input is closed so the same keyboard is
+  reopened when it comes back (before, Windows' reused identifier was skipped
+  as "already open" and the keyboard stayed dead until restart).
+* Waiting for the user's Windows hardware run. No hardware item is confirmed.
 
 ## NEXT
 
@@ -76,6 +89,15 @@ _Last updated: 2026-10-10 (cloud session)._
 5. Show warnings/remaps more prominently; per-backing-track mute in the window.
 6. Anchor Mode (manual anchors without a reference MIDI) — designed for, not started.
 7. Use note-offs / pedal as weak evidence in the follower (sustained-chord passages).
+8. **Strict wait-for-note mode** (practice mode, not implemented). Today only
+   adaptive following exists: the band holds just past the next *unplayed*
+   group (`ScoreFollower::holdNominal`, `holdToleranceSec` 0.10 s), but a group
+   counts as played on its first matching note (missing chord tones are
+   forgiven), wrong notes are only "extra", and skips of up to `maxJump` (5)
+   groups advance. Strict mode must hold the playhead *at* the next group until
+   every pitch of it is pressed, never skip, and never go LOST.
+9. Practice screen: piano roll, part selection, count-in, start from a bar.
+10. Hand split inside one piano track (play one hand, the band plays the other).
 
 ## KNOWN ISSUES
 

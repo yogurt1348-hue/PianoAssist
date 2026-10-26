@@ -1,6 +1,7 @@
 #include "AdaptiveSongPanel.h"
 
 #include "CadenzaLookAndFeel.h"
+#include "../Diagnostics/AppLog.h"
 
 #include <algorithm>
 
@@ -130,7 +131,18 @@ AdaptiveSongPanel::AdaptiveSongPanel(Callbacks callbacks)
         if (auto* e = m_cb.engine ? m_cb.engine() : nullptr) e->setDiagnosticsLogging(m_diagnostics.getToggleState());
     };
     m_diagnostics.setColour(juce::ToggleButton::textColourId, CadenzaLookAndFeel::textDim());
+    m_diagnostics.setTooltip("Write one line per played note to the log (needed when reporting tracking problems)");
     addAndMakeVisible(m_diagnostics);
+    m_openLog.setTooltip("Show the folder with cadenza.log (this run) and cadenza-previous.log (last run)");
+    m_openLog.onClick = [] {
+        const auto dir = cadenza::diagnostics::logDirectory();
+        if (cadenza::diagnostics::currentLogFile().existsAsFile()) cadenza::diagnostics::currentLogFile().revealToUser();
+        else dir.startAsProcess();
+    };
+    m_exportLog.setTooltip("Save this run's and the previous run's log as one text file on the Desktop");
+    m_exportLog.onClick = [this] { exportLog(); };
+    addAndMakeVisible(m_openLog);
+    addAndMakeVisible(m_exportLog);
 
     for (auto* l : { &m_state, &m_position, &m_bpm, &m_confidence, &m_phase, &m_notes }) {
         value(*l);
@@ -143,7 +155,7 @@ AdaptiveSongPanel::AdaptiveSongPanel(Callbacks callbacks)
     addAndMakeVisible(m_warnings);
 
     refreshTracks();
-    setSize(640, 780);
+    setSize(640, 790);
     startTimerHz(15);
 }
 
@@ -281,6 +293,22 @@ void AdaptiveSongPanel::togglePlay()
     m_play.setButtonText("Stop");
 }
 
+void AdaptiveSongPanel::exportLog()
+{
+    juce::Logger::writeToLog("[Adaptive] Log exported by the user");
+    const auto desktop = juce::File::getSpecialLocation(juce::File::userDesktopDirectory);
+    const auto file = cadenza::diagnostics::exportLogReport(desktop, juce::JUCEApplication::getInstance() != nullptr
+                                                                         ? juce::JUCEApplication::getInstance()->getApplicationVersion()
+                                                                         : juce::String());
+    if (file == juce::File()) {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Adaptive Song",
+                                               "Could not write the log to " + desktop.getFullPathName()
+                                                   + ". Use \"Open log folder\" and copy cadenza.log by hand.");
+        return;
+    }
+    file.revealToUser();
+}
+
 void AdaptiveSongPanel::timerCallback()
 {
     auto* e = m_cb.engine ? m_cb.engine() : nullptr;
@@ -367,7 +395,11 @@ void AdaptiveSongPanel::resized()
     sliderRow(m_smoothingCaption, m_smoothing);
     sliderRow(m_sensitivityCaption, m_sensitivity);
     sliderRow(m_waitCaption, m_wait);
-    m_diagnostics.setBounds(row(22).removeFromLeft(200));
+    r = row(24);
+    m_diagnostics.setBounds(r.removeFromLeft(160));
+    m_exportLog.setBounds(r.removeFromRight(160));
+    r.removeFromRight(8);
+    m_openLog.setBounds(r.removeFromRight(130));
 
     r = row(40);
     m_play.setBounds(r.removeFromLeft(140));

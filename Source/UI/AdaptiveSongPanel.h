@@ -46,6 +46,7 @@ private:
     void refreshTracks();
     void rebuild();
     void togglePlay();
+    void exportLog();
     cadenza::adaptive::AdaptiveSessionConfig configFromControls() const;
 
     Callbacks m_cb;
@@ -63,6 +64,7 @@ private:
     juce::Label m_smoothingCaption, m_sensitivityCaption, m_waitCaption;
     juce::Slider m_smoothing, m_sensitivity, m_wait;
     juce::ToggleButton m_diagnostics { "Diagnostics log" };
+    juce::TextButton m_openLog { "Open log folder" }, m_exportLog { "Save log to Desktop" };
 
     juce::TextButton m_play { "Play" };
     juce::Label m_state, m_position, m_bpm, m_confidence, m_phase, m_notes, m_warnings;

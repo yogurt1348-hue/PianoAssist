@@ -338,6 +338,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lib/JUCE/CMakeLists.txt")
                        "(set ASIO_SDK_DIR or place it at lib/asiosdk to enable)")
     endif()
 
+    # Version shown in the log and in exported diagnostic reports. CI passes
+    # -DCADENZA_BUILD_ID=<commit> so a test build can be traced to its source.
+    set(CADENZA_BUILD_ID "local" CACHE STRING "Build identifier shown in diagnostics")
+    target_compile_definitions(Cadenza PRIVATE
+        CADENZA_VERSION_STRING="${PROJECT_VERSION}+${CADENZA_BUILD_ID}")
+
     if(CADENZA_HAVE_FLUIDSYNTH)
         target_compile_definitions(Cadenza PRIVATE CADENZA_HAVE_FLUIDSYNTH=1)
         if(FluidSynth_FOUND)

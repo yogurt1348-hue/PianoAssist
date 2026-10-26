@@ -1,6 +1,7 @@
 #include "MidiRouter.h"
 #include "ChordTypes.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace cadenza::midi
@@ -82,6 +83,21 @@ int MidiRouter::refreshInputs()
             for (const auto& d : available) names << "\"" << d.name << "\" ";
             juce::Logger::writeToLog("[Cadenza] MIDI inputs available: " + names);
         }
+    }
+
+    // Close ports whose device has gone (keyboard unplugged / powered off) so
+    // the same device is opened again when it comes back; Windows usually
+    // reuses the identifier, which the "already open" check below would skip.
+    for (int i = m_inputs.size(); --i >= 0;) {
+        const auto id = m_inputs[i]->getIdentifier();
+        const bool present = std::any_of(available.begin(), available.end(),
+                                         [&id](const juce::MidiDeviceInfo& d) { return d.identifier == id; });
+        if (present)
+            continue;
+        juce::Logger::writeToLog("[Cadenza] MIDI input CLOSED (disconnected): \"" + m_inputs[i]->getName() + "\"");
+        m_inputs[i]->stop();
+        m_openIdentifiers.removeString(id);
+        m_inputs.remove(i);
     }
 
     const bool autoMode = m_selectedInput.isEmpty();
