@@ -27,6 +27,12 @@ juce::String toJuce (const std::string& text)
     return juce::String::fromUTF8 (text.c_str());
 }
 
+juce::String formatTime (double seconds)
+{
+    const auto total = static_cast<int> (std::max (0.0, seconds));
+    return juce::String (total / 60) + ":" + juce::String (total % 60).paddedLeft ('0', 2);
+}
+
 bool isMidiFile (const juce::String& path)
 {
     return path.endsWithIgnoreCase (".mid") || path.endsWithIgnoreCase (".midi") || path.endsWithIgnoreCase (".kar");
@@ -93,13 +99,76 @@ MainComponent::MainComponent (Intents intents)
     partsHeader_.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     addChildComponent (partsHeader_);
 
+    playButton_.setTooltip ("Play / Pause (Space)");
+    playButton_.onClick = [this] { if (intents_.playPause) intents_.playPause(); };
+    stopButton_.setTooltip ("Stop and return to the start. Notes are released and may ring out briefly.");
+    stopButton_.onClick = [this] { if (intents_.stop) intents_.stop(); };
+    silenceButton_.setTooltip ("Emergency silence: cut all sound immediately (Esc)");
+    silenceButton_.onClick = [this] { if (intents_.silence) intents_.silence(); };
+    volume_.setRange (0.0, 1.0);
+    volume_.setValue (0.8, juce::dontSendNotification);
+    volume_.setTitle ("Volume");
+    volume_.onValueChange = [this] { if (intents_.volumeChanged) intents_.volumeChanged (static_cast<float> (volume_.getValue())); };
+    volumeLabel_.setText ("Volume", juce::dontSendNotification);
+    timeLabel_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    transportNote_.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
+    transportNote_.setFont (juce::FontOptions (13.0f));
+    for (auto* c : std::initializer_list<juce::Component*> { &playButton_, &stopButton_, &silenceButton_, &volume_,
+                                                              &volumeLabel_, &timeLabel_, &transportNote_ })
+        addAndMakeVisible (c);
+    setWantsKeyboardFocus (true);
+
     roll_.onZoomChanged = [this] (double pps) { if (intents_.zoomChanged) intents_.zoomChanged (pps); };
+    roll_.onSeekRequested = [this] (double seconds) { if (intents_.seek) intents_.seek (seconds); };
     addAndMakeVisible (roll_);
     addAndMakeVisible (keyboard_);
     emptyHint_.toFront (false);
 
     setInputMonitor ({});
-    setSize (1200, 760);
+    setTransport ({});
+    setSize (1200, 800);
+}
+
+void MainComponent::setTransport (const TransportView& view)
+{
+    using State = TransportView::State;
+    transport_ = view;
+    const bool hasSong = view.state != State::noSong;
+    playButton_.setEnabled (hasSong && view.audioAvailable);
+    stopButton_.setEnabled (hasSong && view.audioAvailable);
+    silenceButton_.setEnabled (view.audioAvailable);
+    playButton_.setButtonText (view.state == State::playing ? "Pause" : "Play");
+    timeLabel_.setText (hasSong ? formatTime (view.positionSeconds) + " / " + formatTime (view.durationSeconds) : juce::String(),
+                        juce::dontSendNotification);
+
+    juce::String note;
+    if (! view.audioAvailable)
+        note = "No sound: " + toJuce (view.audioText);
+    else if (view.mayRingOut && view.state != State::playing)
+        note = view.state == State::paused ? "Playback held; sound may ring out. Silence cuts it." : "Stopped; sound may ring out. Silence cuts it.";
+    else if (view.state == State::completed)
+        note = "End of song.";
+    else
+        note = toJuce (view.audioText);
+    transportNote_.setText (note, juce::dontSendNotification);
+    transportNote_.setColour (juce::Label::textColourId, view.audioAvailable ? juce::Colours::lightgrey : juce::Colours::orange);
+
+    roll_.setPlayhead (view.positionSeconds, view.state == State::playing);
+}
+
+bool MainComponent::keyPressed (const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::spaceKey && intents_.playPause && playButton_.isEnabled())
+    {
+        intents_.playPause();
+        return true;
+    }
+    if (key == juce::KeyPress::escapeKey && intents_.silence)
+    {
+        intents_.silence();
+        return true;
+    }
+    return false;
 }
 
 void MainComponent::rebuildDeviceList (const InputMonitorView& view)
@@ -252,6 +321,19 @@ void MainComponent::resized()
     songTitle_.setBounds (songBar.removeFromLeft (std::min (songBar.getWidth() / 2, 380)));
     songSummary_.setBounds (songBar);
     songNotices_.setBounds (area.removeFromTop (songNotices_.getText().isEmpty() ? 0 : 22));
+
+    area.removeFromTop (6);
+    auto transportBar = area.removeFromTop (30);
+    playButton_.setBounds (transportBar.removeFromLeft (80));
+    transportBar.removeFromLeft (6);
+    stopButton_.setBounds (transportBar.removeFromLeft (70));
+    transportBar.removeFromLeft (6);
+    silenceButton_.setBounds (transportBar.removeFromLeft (80));
+    transportBar.removeFromLeft (12);
+    timeLabel_.setBounds (transportBar.removeFromLeft (120));
+    volume_.setBounds (transportBar.removeFromRight (160));
+    volumeLabel_.setBounds (transportBar.removeFromRight (60));
+    transportNote_.setBounds (transportBar);
 
     area.removeFromTop (6);
     keyboard_.setBounds (area.removeFromBottom (64));

@@ -53,6 +53,9 @@ Decisions taken while implementing, per `11-claude-workflow.md`. Each one can be
 | 2026-10-26 | 2 | A source part is a (track, channel) pair. Role inference order: channel 10 → backing; track name (right/RH/treble, left/LH, drum/bass/guitar/strings/...) → that role; non-piano program (GM > 8) → backing; one remaining piano part → split at C4 (below C4 left hand); two or more → higher average pitch right, next left, rest backing. | Brief's split heuristic; inference shown in the part list and log because it can be wrong. |
 | 2026-10-26 | 2 | Overlapping repeats of one pitch on one channel pair first-on-first-off. | Standard sequencer behaviour; predictable. |
 | 2026-10-26 | 2 | Piano roll: pitch on the vertical axis with note names in a left gutter, time left to right, 88-key strip at the bottom lighting up live input. | Brief's horizontal roll with keyboard at bottom. |
+| 2026-10-26 | 2 | Playback position is counted in rendered audio frames on the audio thread (no wall clock, so no drift); the control thread sends commands through a wait-free queue and reads position/state from atomics. Phase 3 adds gate holds as commands on the same path. | Sample-accurate and deterministic for every buffer size; audio callback stays lock-free. |
+| 2026-10-26 | 2 | Internal synth: additive harmonics with a piano-like decay on juce::Synthesiser, 48 voices, 0.3 s release. Channel 10 drums are not voiced yet. | MVP needs a local instrument; drum sounds are not needed to practise piano. |
+| 2026-10-26 | 2 | Pause/Stop/Seek send note-offs and sustain-off for the notes playback started; voices release naturally ("sound may ring out"). Silence (button or Esc) cuts voices immediately. Space toggles Play/Pause; clicking the roll seeks. | Brief's pause/tail/silence semantics. |
 
 ## Open questions added during implementation
 

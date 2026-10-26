@@ -4,6 +4,7 @@
 #include "ui/KeyboardStrip.h"
 #include "ui/PianoRollComponent.h"
 #include "ui/PianoRollView.h"
+#include "ui/TransportView.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -28,6 +29,11 @@ public:
         std::function<void (const juce::File& file)> openMidiFile;
         std::function<void (std::size_t part, bool visible)> partVisibilityChanged;
         std::function<void (double pixelsPerSecond)> zoomChanged;
+        std::function<void()> playPause;
+        std::function<void()> stop;
+        std::function<void()> silence;
+        std::function<void (double seconds)> seek;
+        std::function<void (float gain)> volumeChanged;
     };
 
     explicit MainComponent (Intents intents);
@@ -36,6 +42,10 @@ public:
     void setSong (std::shared_ptr<const PianoRollView> song);
     void setSongError (const std::string& message);
     void setPixelsPerSecond (double pixelsPerSecond) { roll_.setPixelsPerSecond (pixelsPerSecond); }
+    void setTransport (const TransportView& view);
+    void setVolume (float gain) { volume_.setValue (gain, juce::dontSendNotification); }
+
+    bool keyPressed (const juce::KeyPress& key) override;
 
     void paint (juce::Graphics& g) override;
     void resized() override;
@@ -72,6 +82,15 @@ private:
     juce::Label partsHeader_;
     juce::OwnedArray<juce::ToggleButton> partToggles_;
     juce::OwnedArray<juce::Label> partDetails_;
+
+    juce::TextButton playButton_ { "Play" };
+    juce::TextButton stopButton_ { "Stop" };
+    juce::TextButton silenceButton_ { "Silence" };
+    juce::Slider volume_ { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
+    juce::Label volumeLabel_;
+    juce::Label timeLabel_;
+    juce::Label transportNote_;
+    TransportView transport_;
 
     PianoRollComponent roll_;
     KeyboardStrip keyboard_;

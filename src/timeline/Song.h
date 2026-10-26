@@ -48,6 +48,14 @@ struct TimeSignatureAt
     int denominator = 4;
 };
 
+struct SustainEvent
+{
+    double seconds = 0.0;
+    std::uint16_t track = 0;
+    std::uint8_t channel = 0;
+    std::uint8_t value = 0; ///< >= 64 is pedal down
+};
+
 /** The canonical, immutable song model built from a MIDI file. */
 struct Song
 {
@@ -55,6 +63,7 @@ struct Song
     smf::TempoMap tempoMap;
     std::vector<TimeSignatureAt> timeSignatures;
     std::vector<Part> parts;
+    std::vector<SustainEvent> sustainEvents; ///< sorted by time
     std::vector<std::string> trackNames;
     std::vector<std::string> repairs;
     std::vector<std::string> warnings;

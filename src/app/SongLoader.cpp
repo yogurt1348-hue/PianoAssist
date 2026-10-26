@@ -159,7 +159,7 @@ ui::PianoRollView makePianoRollView (const timeline::Song& song, const std::stri
 
     for (const auto& part : song.parts)
         view.parts.push_back ({ partLabel (part),
-                                std::to_string (part.noteCount) + " notes · " + noteName (part.lowestPitch) + "-"
+                                std::to_string (part.noteCount) + (part.noteCount == 1 ? " note · " : " notes · ") + noteName (part.lowestPitch) + "-"
                                     + noteName (part.highestPitch) + " · " + part.reason,
                                 partRollRole (part.assignment),
                                 roleText (part.assignment) });

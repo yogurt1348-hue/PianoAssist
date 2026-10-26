@@ -6,7 +6,7 @@ The product brief and phase plan live in [`docs/plan/`](docs/plan/README.md). Im
 
 ## Status
 
-Phase 0 (foundation) is done. Phase 1 (USB MIDI input) is in progress: the app lists MIDI inputs, opens the piano automatically, shows a live monitor of notes and the sustain pedal, and recovers when the cable is unplugged and plugged back. Manual check: [`docs/manual-checks/phase-1-midi-input.md`](docs/manual-checks/phase-1-midi-input.md). Phase 2 (song loading and playback) is in progress: MIDI files (format 0/1) open from a button, drag and drop or the command line, and are drawn on a scrollable, zoomable piano roll with inferred hand roles. Playback and practice arrive next.
+Phase 0 (foundation) is done. Phase 1 (USB MIDI input) is in progress: the app lists MIDI inputs, opens the piano automatically, shows a live monitor of notes and the sustain pedal, and recovers when the cable is unplugged and plugged back. Manual check: [`docs/manual-checks/phase-1-midi-input.md`](docs/manual-checks/phase-1-midi-input.md). Phase 2 (song loading and playback) is in progress: MIDI files (format 0/1) open from a button, drag and drop or the command line, are drawn on a scrollable, zoomable piano roll with inferred hand roles, and play through a built-in synth with Play/Pause (Space), Stop, Silence (Esc), volume and click-to-seek. Note-gated practice arrives in phase 3.
 
 ## Requirements
 
@@ -60,7 +60,7 @@ Logs record every startup step, the app and Windows versions, MIDI devices appea
 | `src/transport` | Transport states (state machine arrives in phase 3) |
 | `src/lesson_engine` | Practice profile and calibration (gate engine arrives in phase 3) |
 | `src/midi_io` | Input normalization, monitor state, device selection (JUCE adapter in `src/app`) |
-| `src/audio` | `IInstrumentRenderer` seam (internal synth arrives in phase 2) |
+| `src/audio` | `IInstrumentRenderer` seam, sample-accurate playback engine, built-in synth (JUCE) |
 | `src/settings` | Versioned settings schema with safe fallback |
 | `src/diagnostics` | Rotating structured log, session report |
 | `src/ui`, `src/app` | JUCE window and startup wiring |

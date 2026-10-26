@@ -22,12 +22,16 @@ public:
     void setPartVisible (std::size_t part, bool visible);
     void setHeldInputPitches (std::vector<std::uint8_t> pitches);
     void setPixelsPerSecond (double pixelsPerSecond);
+    /** Moves the playhead; when following, pages the view to keep it visible. */
+    void setPlayhead (double seconds, bool follow);
 
     std::function<void (double pixelsPerSecond)> onZoomChanged;
+    std::function<void (double seconds)> onSeekRequested;
 
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+    void mouseDown (const juce::MouseEvent& e) override;
 
 private:
     static constexpr int gutterWidth = 44;
@@ -45,6 +49,7 @@ private:
     std::vector<std::uint8_t> heldInput_;
     double pixelsPerSecond_ = 120.0;
     double viewStartSeconds_ = 0.0;
+    double playheadSeconds_ = 0.0;
     int lowPitch_ = 48;
     int highPitch_ = 84;
     juce::ScrollBar scrollBar_ { false };

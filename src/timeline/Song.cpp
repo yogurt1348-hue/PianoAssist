@@ -230,6 +230,11 @@ Result<Song> buildSong (const smf::SmfFile& file)
     for (const auto& ts : file.timeSignatures)
         song.timeSignatures.push_back ({ song.tempoMap.tickToSeconds (ts.tick), ts.tick, ts.numerator, ts.denominator });
 
+    for (const auto& sustain : file.sustainEvents)
+        song.sustainEvents.push_back ({ song.tempoMap.tickToSeconds (sustain.tick), sustain.track, sustain.channel, sustain.value });
+    std::stable_sort (song.sustainEvents.begin(), song.sustainEvents.end(),
+                      [] (const SustainEvent& a, const SustainEvent& b) { return a.seconds < b.seconds; });
+
     std::vector<Note> notes;
     notes.reserve (file.notes.size());
     NoteId nextId = 0;

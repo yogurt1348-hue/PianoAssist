@@ -9,6 +9,8 @@ target_sources(PianoAssistApp PRIVATE
     AppPaths.cpp
     MidiInputService.cpp
     SongLoader.cpp
+    AudioService.cpp
+    ${PROJECT_SOURCE_DIR}/src/audio/InternalSynthRenderer.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/MainComponent.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/PianoRollComponent.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/KeyboardStrip.cpp)
@@ -27,6 +29,7 @@ target_link_libraries(PianoAssistApp
         PianoAssist::transport
         PianoAssist::midi_io
         PianoAssist::timeline
+        PianoAssist::audio
         juce::juce_gui_basics
         juce::juce_audio_devices
     PUBLIC

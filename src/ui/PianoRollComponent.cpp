@@ -29,6 +29,7 @@ void PianoRollComponent::setSong (const PianoRollView* view)
 {
     view_ = view;
     viewStartSeconds_ = 0.0;
+    playheadSeconds_ = 0.0;
     partVisible_.assign (view != nullptr ? view->parts.size() : 0, true);
     if (view != nullptr && ! view->notes.empty())
     {
@@ -155,7 +156,35 @@ void PianoRollComponent::paint (juce::Graphics& g)
         g.setColour (colour);
         g.fillRoundedRectangle (rect, std::min (3.0f, row / 3.0f));
     }
+    const float playheadX = xForSeconds (playheadSeconds_);
+    g.setColour (juce::Colour (0xffff5c5c));
+    g.fillRect (juce::Rectangle<float> (playheadX - 1.0f, static_cast<float> (area.getY()), 2.0f, static_cast<float> (area.getHeight())));
     g.restoreState();
+}
+
+void PianoRollComponent::setPlayhead (double seconds, bool follow)
+{
+    if (std::abs (seconds - playheadSeconds_) < 1.0e-4 && ! follow)
+        return;
+    playheadSeconds_ = seconds;
+    if (follow)
+    {
+        const double visible = rollArea().getWidth() / pixelsPerSecond_;
+        if (seconds < viewStartSeconds_ || seconds > viewStartSeconds_ + visible * 0.8)
+        {
+            viewStartSeconds_ = std::max (0.0, seconds - visible * 0.2);
+            updateScrollBar();
+        }
+    }
+    repaint (rollArea());
+}
+
+void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
+{
+    if (view_ == nullptr || ! rollArea().contains (e.getPosition()) || ! onSeekRequested)
+        return;
+    const double seconds = viewStartSeconds_ + (static_cast<double> (e.position.x) - rollArea().getX()) / pixelsPerSecond_;
+    onSeekRequested (std::clamp (seconds, 0.0, view_->durationSeconds));
 }
 
 void PianoRollComponent::resized()
