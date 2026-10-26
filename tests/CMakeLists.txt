@@ -7,6 +7,7 @@ add_executable(pianoassist_tests
     unit/SettingsTests.cpp
     unit/RotatingLogTests.cpp
     unit/Utf8PathTests.cpp
+    unit/MidiInputTests.cpp
     unit/Fixtures.cpp)
 
 target_include_directories(pianoassist_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)

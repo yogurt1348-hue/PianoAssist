@@ -7,6 +7,7 @@ juce_add_gui_app(PianoAssistApp
 target_sources(PianoAssistApp PRIVATE
     Main.cpp
     AppPaths.cpp
+    MidiInputService.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/MainComponent.cpp)
 
 target_compile_definitions(PianoAssistApp PRIVATE
@@ -21,6 +22,7 @@ target_link_libraries(PianoAssistApp
         PianoAssist::settings
         PianoAssist::diagnostics
         PianoAssist::transport
+        PianoAssist::midi_io
         juce::juce_gui_basics
         juce::juce_audio_devices
     PUBLIC

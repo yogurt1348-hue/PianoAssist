@@ -6,7 +6,7 @@ The product brief and phase plan live in [`docs/plan/`](docs/plan/README.md). Im
 
 ## Status
 
-Phase 0 (foundation): the app opens to an empty window and writes a session log. Song loading, MIDI input and practice arrive in phases 1 to 5.
+Phase 0 (foundation) is done. Phase 1 (USB MIDI input) is in progress: the app lists MIDI inputs, opens the piano automatically, shows a live monitor of notes and the sustain pedal, and recovers when the cable is unplugged and plugged back. Manual check: [`docs/manual-checks/phase-1-midi-input.md`](docs/manual-checks/phase-1-midi-input.md). Song loading and practice arrive in phases 2 to 5.
 
 ## Requirements
 
@@ -46,9 +46,9 @@ No MIDI keyboard or audio device is needed for the automated tests.
 | File | Location on Windows |
 | --- | --- |
 | Settings | `%APPDATA%\PianoAssist\settings.json` |
-| Logs | `%APPDATA%\PianoAssist\logs\pianoassist.log` (JSON lines, rotated at 1 MiB, 4 archives kept) |
+| Logs | `%APPDATA%\PianoAssist\logs\pianoassist.log` (JSON lines, rotated at 5 MiB, 5 archives kept) |
 
-Logs record the app version, Windows version and MIDI device names. They do not record the paths or contents of your music files.
+Logs record every startup step, the app and Windows versions, MIDI devices appearing and disappearing, every note and pedal event, user actions, errors and crashes with a stack trace. They do not record the paths or contents of your music files. "Open log folder" in the app opens this folder.
 
 ## Layout
 
@@ -59,7 +59,7 @@ Logs record the app version, Windows version and MIDI device names. They do not 
 | `src/timeline` | Immutable normalized note model |
 | `src/transport` | Transport states (state machine arrives in phase 3) |
 | `src/lesson_engine` | Practice profile and calibration (gate engine arrives in phase 3) |
-| `src/midi_io` | Timestamped input event type (device adapter arrives in phase 1) |
+| `src/midi_io` | Input normalization, monitor state, device selection (JUCE adapter in `src/app`) |
 | `src/audio` | `IInstrumentRenderer` seam (internal synth arrives in phase 2) |
 | `src/settings` | Versioned settings schema with safe fallback |
 | `src/diagnostics` | Rotating structured log, session report |

@@ -10,7 +10,8 @@ enum class InputEventType : std::uint8_t
 {
     noteOn,
     noteOff,
-    sustain, ///< CC64; value >= 64 means pedal down
+    sustain, ///< CC64; data2 >= 64 means pedal down
+    other,   ///< anything else; counted and logged at a throttled rate
 };
 
 /** Fixed-size event pushed from the MIDI callback into a lock-free queue.
@@ -21,7 +22,7 @@ struct InputEvent
     std::uint64_t sequence = 0;       ///< orders events with equal timestamps
     InputEventType type = InputEventType::noteOn;
     std::uint8_t channel = 0;         ///< 0-15
-    std::uint8_t data1 = 0;           ///< pitch, or controller number
+    std::uint8_t data1 = 0;           ///< pitch, controller number, or status byte for `other`
     std::uint8_t data2 = 0;           ///< velocity, or controller value
 };
 
