@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows x64 (${{ matrix.config }})
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset windows-x64
+      - name: Build
+        run: cmake --build --preset windows-x64-${{ matrix.config == 'Debug' && 'debug' || 'release' }} --parallel
+      - name: Test
+        run: ctest --preset windows-x64-${{ matrix.config == 'Debug' && 'debug' || 'release' }}
+      - name: Upload app
+        if: matrix.config == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PianoAssist-windows-x64
+          path: build/windows-x64/src/app/PianoAssistApp_artefacts/Release/PianoAssist.exe
+          if-no-files-found: error
+
+  tests-linux:
+    name: Domain tests (Linux, no JUCE)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset tests-only
+      - name: Build
+        run: cmake --build --preset tests-only --parallel
+      - name: Test
+        run: ctest --preset tests-only
