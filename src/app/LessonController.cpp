@@ -2,6 +2,7 @@
 
 #include "core/NoteName.h"
 #include "lesson_engine/Gate.h"
+#include "lesson_engine/Latency.h"
 #include "lesson_engine/PracticeClock.h"
 
 #include <algorithm>
@@ -19,6 +20,18 @@ constexpr int tickMs = 2;
 constexpr std::int64_t wrongFlashMicros = 400'000;
 constexpr double accompanimentOnlyAfterSeconds = 1.5;
 constexpr std::size_t upcomingGateCount = 3;
+constexpr std::int64_t healthEveryMicros = 10'000'000;
+constexpr std::size_t recentOffsetCount = 24;
+constexpr int latencyClicks = 14;
+constexpr std::size_t latencyWarmUpClicks = 2;
+constexpr std::int64_t latencyIntervalMicros = 1'000'000;
+constexpr std::int64_t latencyClickLengthMicros = 80'000;
+constexpr std::uint8_t latencyClickPitch = 84; // C6: short and clear on any piano sound
+
+std::string ms (double value, int decimals = 1)
+{
+    return juce::String (value, decimals).toStdString();
+}
 
 std::vector<GateHands> splitByHand (const timeline::Timeline& timeline, const std::vector<lesson::Gate>& gates)
 {
@@ -107,6 +120,9 @@ void LessonController::setMode (lesson::PracticeMode mode) { post (SetMode { mod
 void LessonController::setProfile (lesson::PracticeProfile profile) { post (SetProfile { std::move (profile) }); }
 void LessonController::previewKey (std::uint8_t pitch, bool down) { post (PreviewKey { pitch, down }); }
 void LessonController::setCountIn (bool on) { post (SetCountIn { on }); }
+void LessonController::setInputOffset (double ms) { post (SetInputOffset { ms }); }
+void LessonController::startLatencyTest() { post (StartLatencyTest {}); }
+void LessonController::stopLatencyTest() { post (StopLatencyTest {}); }
 
 PracticeSnapshot LessonController::snapshot() const
 {
@@ -336,6 +352,36 @@ void LessonController::handle (const Intent& intent)
                 partGains_ = i.gains;
                 rebuild (audio.positionSeconds, "track volumes changed", true);
             }
+            else if constexpr (std::is_same_v<T, SetInputOffset>)
+            {
+                inputOffsetMs_ = i.ms;
+                recentOffsets_.clear(); // old presses were judged with the old delay
+                hintGiven_ = false;
+                log_.write (LogLevel::info, "lesson", "Input delay changed", { { "ms", ms (i.ms) } });
+            }
+            else if constexpr (std::is_same_v<T, StartLatencyTest>)
+            {
+                cancelCountIn();
+                if (audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate)
+                {
+                    logTransport ("Paused for the latency test", audio);
+                    audio_.pause();
+                }
+                latency_ = {};
+                latency_.active = true;
+                latency_.startMicros = AudioService::nowMicros() + 500'000;
+                latency_.lastSeenPreview = audio_.lastPreviewMicros();
+                log_.write (LogLevel::info, "latency", "Latency test started",
+                            { { "clicks", std::to_string (latencyClicks) },
+                              { "intervalMs", std::to_string (latencyIntervalMicros / 1000) },
+                              { "reportedOutputMs", ms (audio_.reportedOutputLatencyMs()) },
+                              { "device", audio_.deviceDescription() } });
+            }
+            else if constexpr (std::is_same_v<T, StopLatencyTest>)
+            {
+                if (latency_.active)
+                    finishLatencyTest ("stopped by the user");
+            }
             else if constexpr (std::is_same_v<T, PreviewKey>)
             {
                 log_.write (LogLevel::debug, "ui", i.down ? "On-screen key down" : "On-screen key up",
@@ -348,6 +394,11 @@ void LessonController::handle (const Intent& intent)
 
 void LessonController::handleInput (const midi_io::InputEvent& event, const AudioService::Snapshot& audio)
 {
+    if (event.type == midi_io::InputEventType::noteOn && latency_.active)
+    {
+        latency_.taps.push_back (event.timestampMicros);
+        return; // during the test presses only measure the delay
+    }
     if (event.type != midi_io::InputEventType::noteOn || ! session_)
         return;
     if (audio.state != PlaybackState::playing && audio.state != PlaybackState::waitingForGate)
@@ -371,21 +422,183 @@ void LessonController::handleInput (const midi_io::InputEvent& event, const Audi
     if (result.verdict == lesson::PressVerdict::wrongPitch || result.verdict == lesson::PressVerdict::tooEarly)
         wrong_.push_back ({ event.data1, event.timestampMicros });
 
+    // How long the press took from the MIDI driver to this verdict.
+    const double procMs = static_cast<double> (AudioService::nowMicros() - event.timestampMicros) / 1000.0;
+    windowProcMs_.push_back (procMs);
     log_.write (LogLevel::debug, "lesson", "Press judged",
                 { { "note", noteName (event.data1) },
                   { "verdict", lesson::toString (result.verdict) },
                   { "gate", std::to_string (result.gateIndex + 1) },
-                  { "offsetMs", juce::String (result.offsetMs, 1).toStdString() } });
+                  { "offsetMs", ms (result.offsetMs) },
+                  { "procMs", ms (procMs, 2) },
+                  { "velocity", std::to_string (event.data2) },
+                  { "position", seconds (audio.positionSeconds) },
+                  { "state", audio::toString (audio.state) } });
+
+    using V = lesson::PressVerdict;
+    if (result.verdict == V::wrongPitch || result.verdict == V::tooEarly)
+        ++windowWrong_;
+    const bool counted = result.verdict == V::acceptedOnTime || result.verdict == V::acceptedEarly
+                         || result.verdict == V::acceptedLate;
+    // Presses after a long wait say nothing about timing; leave them out.
+    if (counted && std::abs (result.offsetMs) < 1000.0)
+    {
+        windowOffsets_.push_back (result.offsetMs);
+        recentOffsets_.push_back (result.offsetMs);
+        while (recentOffsets_.size() > recentOffsetCount)
+            recentOffsets_.pop_front();
+        if (! hintGiven_)
+            if (const auto late = lesson::steadyLateness ({ recentOffsets_.begin(), recentOffsets_.end() }))
+            {
+                hintGiven_ = true;
+                steadyLateMs_ = *late;
+                ++steadyLateSeq_;
+                log_.write (LogLevel::warning, "latency", "Steadily late: the sound probably reaches the player late",
+                            { { "medianMs", ms (*late, 0) },
+                              { "presses", std::to_string (recentOffsets_.size()) },
+                              { "inputOffsetMs", ms (inputOffsetMs_) },
+                              { "reportedOutputMs", ms (audio_.reportedOutputLatencyMs()) },
+                              { "device", audio_.deviceDescription() } });
+            }
+    }
 
     if (result.gatePassed)
     {
         const bool wasWaiting = audio.state == PlaybackState::waitingForGate;
+        const auto waitedMs = wasWaiting ? static_cast<double> (event.timestampMicros - waitStartedMicros_) / 1000.0 : 0.0;
+        if (wasWaiting)
+        {
+            ++windowStalls_;
+            windowStallMs_ += std::max (0.0, waitedMs);
+        }
         log_.write (LogLevel::info, "lesson", "Gate passed",
                     { { "gate", std::to_string (result.gateIndex + 1) },
                       { "held", wasWaiting ? "yes" : "no" },
-                      { "waitMs", wasWaiting ? std::to_string ((event.timestampMicros - waitStartedMicros_) / 1000) : "0" } });
+                      { "waitMs", wasWaiting ? std::to_string (static_cast<std::int64_t> (waitedMs)) : "0" },
+                      { "offsetMs", ms (result.offsetMs) } });
         sendGate();
     }
+}
+
+std::string LessonController::channelNames (int channel) const
+{
+    std::string text;
+    if (song_)
+        for (std::size_t p = 0; p < song_->parts.size(); ++p)
+        {
+            const auto& part = song_->parts[p];
+            if (part.channel != channel)
+                continue;
+            const bool muted = p < mutedParts_.size() && mutedParts_[p];
+            text += (text.empty() ? "" : "+") + (part.trackName.empty() ? "track " + std::to_string (part.track + 1) : part.trackName)
+                    + (muted ? " (muted)" : "");
+        }
+    return text.empty() ? (channel == audio::PlaybackCommand::previewChannel ? "preview/clicks" : "?") : text;
+}
+
+void LessonController::logHealth (const char* why)
+{
+    lastHealthMicros_ = AudioService::nowMicros();
+    const auto h = audio_.takeHealth();
+    log_.write (h.overBudget > 0 || h.maxGapMs > 3.0 * h.budgetMs ? LogLevel::warning : LogLevel::info, "audio", "Audio health",
+                { { "why", why },
+                  { "callbacks", std::to_string (h.callbacks) },
+                  { "avgMs", ms (h.avgCallbackMs, 2) },
+                  { "maxMs", ms (h.maxCallbackMs, 2) },
+                  { "budgetMs", ms (h.budgetMs, 2) },
+                  { "overBudget", std::to_string (h.overBudget) },
+                  { "maxGapMs", ms (h.maxGapMs, 1) },
+                  { "xruns", std::to_string (h.xruns) },
+                  { "reportedOutputMs", ms (audio_.reportedOutputLatencyMs()) } });
+
+    std::string activity;
+    for (int ch = 0; ch < 16; ++ch)
+        if (h.channelNotes[static_cast<std::size_t> (ch)] > 0)
+            activity += (activity.empty() ? "" : "; ") + std::string ("ch") + std::to_string (ch + 1) + " " + channelNames (ch)
+                        + ": " + std::to_string (h.channelNotes[static_cast<std::size_t> (ch)]);
+    if (! activity.empty())
+        log_.write (LogLevel::info, "audio", "Track activity", { { "notesStarted", activity } });
+
+    if (! windowOffsets_.empty() || windowWrong_ > 0 || windowStalls_ > 0)
+    {
+        const auto t = lesson::timingStats (windowOffsets_);
+        const auto proc = lesson::timingStats (windowProcMs_);
+        log_.write (LogLevel::info, "lesson", "Practice timing",
+                    { { "why", why },
+                      { "presses", std::to_string (t.count) },
+                      { "medianMs", ms (t.median, 0) },
+                      { "p10Ms", ms (t.p10, 0) },
+                      { "p90Ms", ms (t.p90, 0) },
+                      { "spreadMs", ms (t.spread(), 0) },
+                      { "wrong", std::to_string (windowWrong_) },
+                      { "stalls", std::to_string (windowStalls_) },
+                      { "stallMs", ms (windowStallMs_, 0) },
+                      { "inputMedianMs", ms (proc.median, 2) },
+                      { "inputMaxMs", ms (proc.count > 0 ? *std::max_element (windowProcMs_.begin(), windowProcMs_.end()) : 0.0, 2) },
+                      { "inputOffsetMs", ms (inputOffsetMs_) },
+                      { "lateWindowMs", ms (profile_.onsetLateMs, 0) } });
+    }
+    windowOffsets_.clear();
+    windowProcMs_.clear();
+    windowWrong_ = 0;
+    windowStalls_ = 0;
+    windowStallMs_ = 0.0;
+}
+
+void LessonController::tickLatencyTest()
+{
+    if (! latency_.active)
+        return;
+    const auto now = AudioService::nowMicros();
+    if (latency_.offDueMicros >= 0 && now >= latency_.offDueMicros)
+    {
+        audio_.previewKey (latencyClickPitch, false);
+        latency_.offDueMicros = -1;
+    }
+    // The audio thread notes when the click's block started; that is the
+    // same reference the song notes use when presses are judged.
+    if (const auto seen = audio_.lastPreviewMicros(); seen != latency_.lastSeenPreview)
+    {
+        latency_.lastSeenPreview = seen;
+        latency_.clicks.push_back (seen);
+    }
+    if (latency_.sent < latencyClicks && now >= latency_.startMicros + latency_.sent * latencyIntervalMicros)
+    {
+        audio_.previewKey (latencyClickPitch, true);
+        latency_.offDueMicros = now + latencyClickLengthMicros;
+        ++latency_.sent;
+    }
+    if (latency_.sent >= latencyClicks && now >= latency_.startMicros + latencyClicks * latencyIntervalMicros)
+        finishLatencyTest ("done");
+}
+
+void LessonController::finishLatencyTest (const char* why)
+{
+    if (latency_.offDueMicros >= 0)
+        audio_.previewKey (latencyClickPitch, false);
+    latency_.offDueMicros = -1;
+    latency_.active = false;
+    const auto diffs = lesson::matchTapsToClicks (latency_.clicks, latency_.taps, latencyWarmUpClicks, latencyIntervalMicros);
+    const auto s = lesson::timingStats (diffs);
+    latency_.matched = static_cast<int> (s.count);
+    latency_.resultMs = s.median;
+    latency_.spreadMs = s.spread();
+    const bool enough = s.count >= 6 && std::string (why) == "done";
+    latency_.done = enough;
+    latency_.failed = ! enough;
+    std::string all;
+    for (const auto d : diffs)
+        all += (all.empty() ? "" : " ") + ms (d, 0);
+    log_.write (LogLevel::info, "latency", enough ? "Latency test result" : "Latency test without a result",
+                { { "why", why },
+                  { "clicks", std::to_string (latency_.clicks.size()) },
+                  { "presses", std::to_string (latency_.taps.size()) },
+                  { "matched", std::to_string (s.count) },
+                  { "medianMs", ms (s.median, 0) },
+                  { "spreadMs", ms (s.spread(), 0) },
+                  { "diffsMs", all },
+                  { "reportedOutputMs", ms (audio_.reportedOutputLatencyMs()) },
+                  { "device", audio_.deviceDescription() } });
 }
 
 void LessonController::publish (const AudioService::Snapshot& audio)
@@ -401,6 +614,17 @@ void LessonController::publish (const AudioService::Snapshot& audio)
     snap.mode = mode_;
     snap.waiting = audio.state == PlaybackState::waitingForGate;
     snap.lastVerdict = lastVerdict_;
+    snap.latencyTest.active = latency_.active;
+    snap.latencyTest.done = latency_.done;
+    snap.latencyTest.failed = latency_.failed;
+    snap.latencyTest.clicks = latency_.sent;
+    snap.latencyTest.totalClicks = latencyClicks;
+    snap.latencyTest.matched = latency_.matched;
+    snap.latencyTest.resultMs = latency_.resultMs;
+    snap.latencyTest.spreadMs = latency_.spreadMs;
+    snap.steadyLateMs = steadyLateMs_;
+    snap.steadyLateSeq = steadyLateSeq_;
+    snap.inputOffsetMs = inputOffsetMs_;
     if (countIn_.active)
     {
         snap.countInBeat = std::max (1, countIn_.clicked);
@@ -546,7 +770,14 @@ void LessonController::hiResTimerCallback()
                           { "missing", names (session_->missingPitches()) } });
     }
     tickCountIn();
+    tickLatencyTest();
     checkLoop (audio);
+    const bool running = audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate;
+    const bool wasRunning = lastState_ == PlaybackState::playing || lastState_ == PlaybackState::waitingForGate;
+    if (running && AudioService::nowMicros() - lastHealthMicros_ >= healthEveryMicros)
+        logHealth ("playing");
+    else if (wasRunning && ! running)
+        logHealth ("stopped");
     if (audio.state != lastState_)
     {
         log_.write (LogLevel::info, "transport", "Playback state changed",

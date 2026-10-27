@@ -42,3 +42,13 @@
 ## Потеря MIDI-устройства
 
 - Если пианино отключилось во время ожидания, песня продолжает ждать. После повторного подключения достаточно сыграть нужную ноту, ничего не сбрасывается.
+
+## Sound and input delay
+
+Your piano sounds at once, but the accompaniment from the computer reaches you after the audio buffer, the driver and anything in between (virtual devices such as SteelSeries Sonar, Bluetooth or wireless headphones). Players follow what they hear, so with a large delay every press lands late by about the same amount and the song stops briefly at almost every note.
+
+- **Measure delay** (Settings → MIDI and audio) clicks 14 times, once a second, through the current output. Press any key on each click. The first two clicks are a warm-up; each press is matched to its nearest click, and the median of press minus click is the delay. **Use** stores it as the input delay, applied from the next press without a restart.
+- Presses are moved earlier by the input delay before they are judged. The song, the gates and the time windows do not change.
+- While practising, if the last 24 presses are late by a steady amount (median over 120 ms, interquartile range under 120 ms), the app shows a hint once and writes "Steadily late" to the log.
+
+The log gets, every 10 seconds of playback and when it stops: "Audio health" (callback time against its budget, longest gap between callbacks, driver glitch count), "Track activity" (notes started per MIDI channel with the track names) and "Practice timing" (median and spread of press timing, wrong notes, how often and how long the song waited, MIDI-to-verdict time).

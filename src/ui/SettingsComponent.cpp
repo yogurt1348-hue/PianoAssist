@@ -93,17 +93,47 @@ public:
                                    "automatically after a reconnect. If another program (a DAW, FL Studio, Casio app) uses "
                                    "the piano, close it and press Rescan."));
 
-        addHeading (latencyHeading_, TRANS ("Input delay"));
-        latency_.setRange (-50.0, 150.0, 1.0);
+        addHeading (latencyHeading_, TRANS ("Sound and input delay"));
+        latency_.setRange (-100.0, 600.0, 1.0);
         latency_.setTextValueSuffix (" ms");
         latency_.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 24);
         latency_.setTitle (TRANS ("Input delay"));
         latency_.onDragEnd = [this] { if (intents_.inputOffsetChanged) intents_.inputOffsetChanged (latency_.getValue()); };
         addAndMakeVisible (latency_);
-        addNote (latencyNote_, TRANS ("How much earlier your presses are counted, to make up for the delay of the piano, "
-                                      "USB and sound output. Leave 0 unless presses on the beat are judged late; then try 20-60 ms."));
+        addNote (latencyNote_, TRANS ("How much earlier your presses are counted. Your piano sounds at once, but the "
+                                      "accompaniment from the computer reaches you later (buffer, virtual audio devices, "
+                                      "wireless headphones), and you naturally play along with it. Measure it: press "
+                                      "Measure delay and play any key exactly on each click."));
+        measure_.setButtonText (TRANS ("Measure delay..."));
+        measure_.onClick = [this] {
+            if (testActive_)
+            {
+                if (intents_.stopLatencyTest)
+                    intents_.stopLatencyTest();
+            }
+            else if (intents_.startLatencyTest)
+                intents_.startLatencyTest();
+        };
+        addAndMakeVisible (measure_);
+        apply_.onClick = [this] {
+            latency_.setValue (std::round (measured_), juce::dontSendNotification);
+            if (intents_.inputOffsetChanged)
+                intents_.inputOffsetChanged (latency_.getValue());
+        };
+        addChildComponent (apply_);
+        testStatus_.setFont (juce::FontOptions (14.0f));
+        testStatus_.setMinimumHorizontalScale (1.0f);
+        testStatus_.setJustificationType (juce::Justification::topLeft);
+        addAndMakeVisible (testStatus_);
 
         addHeading (audioHeading_, TRANS ("Sound output"));
+        addNote (audioNote_, TRANS ("For the lowest delay choose your real speakers or wired headphones, not a virtual "
+                                    "device (SteelSeries Sonar, Nahimic, Voicemeeter) or Bluetooth. Try \"Windows Audio (Low "
+                                    "Latency Mode)\" or \"(Exclusive Mode)\" and the smallest buffer that plays without "
+                                    "crackles, then measure again."));
+        audioNow_.setFont (juce::FontOptions (14.0f));
+        audioNow_.setMinimumHorizontalScale (1.0f);
+        addAndMakeVisible (audioNow_);
         audio_.setItemHeight (26);
         addAndMakeVisible (audio_);
         devices.addChangeListener (&listener_);
@@ -138,6 +168,33 @@ public:
 
     void setValues (const Values& v) { latency_.setValue (v.inputOffsetMs, juce::dontSendNotification); }
 
+    void setLatency (const LatencyView& v)
+    {
+        testActive_ = v.active;
+        measure_.setButtonText (v.active ? TRANS ("Stop") : TRANS ("Measure delay..."));
+        juce::String text;
+        if (v.active)
+            text = TRANS ("Press any key on the piano exactly on each click.") + "  " + juce::String (v.clicks) + " / "
+                   + juce::String (v.totalClicks);
+        else if (v.done)
+            text = TRANS ("Measured delay") + ": " + juce::String (juce::roundToInt (v.resultMs)) + " " + TRANS ("ms") + " ("
+                   + TRANS ("spread") + " " + juce::String (juce::roundToInt (v.spreadMs)) + " " + TRANS ("ms") + ", "
+                   + juce::String (v.matched) + " " + TRANS ("presses") + ")";
+        else if (v.failed)
+            text = TRANS ("Not enough presses on the clicks. Try again and press on every click.");
+        testStatus_.setText (text, juce::dontSendNotification);
+        testStatus_.setColour (juce::Label::textColourId, v.failed ? theme::warning : theme::text);
+        audioNow_.setColour (juce::Label::textColourId, theme::text);
+        measured_ = v.resultMs;
+        const bool canApply = v.done && ! v.active && std::abs (v.resultMs - latency_.getValue()) >= 1.0;
+        apply_.setButtonText (TRANS ("Use") + " " + juce::String (juce::roundToInt (std::clamp (v.resultMs, -100.0, 600.0))) + " "
+                              + TRANS ("ms"));
+        apply_.setVisible (canApply);
+        audioNow_.setText (TRANS ("Now") + ": " + juce::String::fromUTF8 (v.device.c_str()) + ". " + TRANS ("The driver reports")
+                               + " " + juce::String (v.reportedOutputMs, 1) + " " + TRANS ("ms") + ".",
+                           juce::dontSendNotification);
+    }
+
     void resized() override
     {
         Rows r { getLocalBounds().reduced (20, 16) };
@@ -149,9 +206,17 @@ public:
         status_.setBounds (r.take (22, 2));
         midiNote_.setBounds (r.take (52, 14));
         latencyHeading_.setBounds (r.take (26, 4));
-        latency_.setBounds (r.take (28, 2).withWidth (std::min (r.area.getWidth(), 420)));
-        latencyNote_.setBounds (r.take (40, 14));
+        auto sliderRow = r.take (30, 4);
+        latency_.setBounds (sliderRow.removeFromLeft (std::min (sliderRow.getWidth() / 2, 420)));
+        sliderRow.removeFromLeft (12);
+        measure_.setBounds (sliderRow.removeFromLeft (190));
+        sliderRow.removeFromLeft (8);
+        apply_.setBounds (sliderRow.removeFromLeft (140));
+        testStatus_.setBounds (r.take (22, 2));
+        latencyNote_.setBounds (r.take (56, 12));
         audioHeading_.setBounds (r.take (26, 4));
+        audioNow_.setBounds (r.take (22, 2));
+        audioNote_.setBounds (r.take (56, 6));
         audio_.setBounds (r.area.withHeight (std::max (200, r.area.getHeight())));
     }
 
@@ -163,9 +228,11 @@ private:
     };
 
     Intents& intents_;
-    juce::Label midiHeading_, midiNote_, status_, latencyHeading_, latencyNote_, audioHeading_;
+    juce::Label midiHeading_, midiNote_, status_, latencyHeading_, latencyNote_, audioHeading_, audioNote_, audioNow_, testStatus_;
     juce::ComboBox input_;
-    juce::TextButton rescan_;
+    juce::TextButton rescan_, measure_, apply_;
+    bool testActive_ = false;
+    double measured_ = 0.0;
     juce::Slider latency_ { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::AudioDeviceSelectorComponent audio_;
     Listener listener_;
@@ -604,6 +671,11 @@ void SettingsComponent::setValues (const Values& values)
     practice_->setValues (values);
     appearance_->setValues (values);
     diagnostics_->setValues (values);
+}
+
+void SettingsComponent::setLatency (const LatencyView& view)
+{
+    midiAudio_->setLatency (view);
 }
 
 void SettingsComponent::setInputMonitor (const InputMonitorView& view)

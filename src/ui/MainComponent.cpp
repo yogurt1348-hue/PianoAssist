@@ -300,6 +300,7 @@ MainComponent::MainComponent (Intents intents)
         roll->onUserScrolledChanged = [this] (bool away) { toPlayhead_.setToggleState (away && follow_, juce::dontSendNotification); };
 
     toast_.setFont (juce::FontOptions (14.0f));
+    toast_.setMinimumHorizontalScale (1.0f); // wraps to a second line instead of squeezing
     toast_.setJustificationType (juce::Justification::centred);
     addChildComponent (toast_);
     volume_.setRange (0.0, 1.0);
@@ -458,13 +459,13 @@ void MainComponent::setLayoutChoices (int sidebarWidth, bool collapsed, bool fol
     setSidebar (sidebarWidth, collapsed, false);
 }
 
-void MainComponent::showToast (const juce::String& text)
+void MainComponent::showToast (const juce::String& text, int showForMs)
 {
     toast_.setText (text, juce::dontSendNotification);
     toast_.setVisible (text.isNotEmpty());
     toast_.toFront (false);
     resized();
-    startTimer (7000);
+    startTimer (showForMs);
 }
 
 void MainComponent::timerCallback()
@@ -944,7 +945,7 @@ void MainComponent::resized()
     roll_.setBounds (inner);
     tracksRoll_.setBounds (inner);
     tracksEmpty_.setBounds (inner.withSizeKeepingCentre (inner.getWidth(), 40));
-    toast_.setBounds (rollPanel_.withSizeKeepingCentre (std::min (rollPanel_.getWidth() - 40, 640), 40).withY (rollPanel_.getBottom() - 60));
+    toast_.setBounds (rollPanel_.withSizeKeepingCentre (std::min (rollPanel_.getWidth() - 40, 640), 48).withY (rollPanel_.getBottom() - 68));
 
     auto centre = inner.withSizeKeepingCentre (std::min (inner.getWidth(), 360), 220);
     emptyOpenButton_.setBounds (centre.removeFromTop (54).reduced (40, 0));

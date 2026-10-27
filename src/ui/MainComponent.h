@@ -109,7 +109,7 @@ public:
     /** Side panel width and state, and whether the roll follows the playhead. */
     void setLayoutChoices (int sidebarWidth, bool collapsed, bool follow);
     /** A short message that goes away by itself. */
-    void showToast (const juce::String& text);
+    void showToast (const juce::String& text, int showForMs = 7000);
     void setRecentFiles (std::vector<std::string> utf8Paths);
     void setAppearance (bool light, double scale);
 

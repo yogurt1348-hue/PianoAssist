@@ -435,6 +435,27 @@ constexpr Pair pairs[] = {
     { "Load a SoundFont", "Загрузить SoundFont" },
     { "Add a VST3 instrument", "Добавить VST3-инструмент" },
     { "Add a folder with VST3 instruments", "Добавить папку с VST3-инструментами" },
+
+    // Latency
+    { "Sound and input delay", "Задержка звука и ввода" },
+    { "How much earlier your presses are counted. Your piano sounds at once, but the accompaniment from the computer reaches you later (buffer, virtual audio devices, wireless headphones), and you naturally play along with it. Measure it: press Measure delay and play any key exactly on each click.",
+      "Насколько раньше засчитываются ваши нажатия. Пианино звучит сразу, а аккомпанемент из компьютера доходит до вас позже (буфер, виртуальные звуковые устройства, беспроводные наушники), и вы невольно играете под него. Измерьте: нажмите «Измерить задержку» и нажимайте любую клавишу точно на каждый щелчок." },
+    { "Measure delay...", "Измерить задержку..." },
+    { "Press any key on the piano exactly on each click.", "Нажимайте любую клавишу на пианино точно на каждый щелчок." },
+    { "Measured delay", "Измеренная задержка" },
+    { "ms", "мс" },
+    { "spread", "разброс" },
+    { "presses", "нажатий" },
+    { "Not enough presses on the clicks. Try again and press on every click.",
+      "Слишком мало нажатий в такт щелчкам. Попробуйте ещё раз и нажимайте на каждый щелчок." },
+    { "Use", "Применить" },
+    { "Now", "Сейчас" },
+    { "The driver reports", "Драйвер сообщает о задержке" },
+    { "For the lowest delay choose your real speakers or wired headphones, not a virtual device (SteelSeries Sonar, Nahimic, Voicemeeter) or Bluetooth. Try \"Windows Audio (Low Latency Mode)\" or \"(Exclusive Mode)\" and the smallest buffer that plays without crackles, then measure again.",
+      "Для минимальной задержки выберите настоящие колонки или проводные наушники, а не виртуальное устройство (SteelSeries Sonar, Nahimic, Voicemeeter) или Bluetooth. Попробуйте «Windows Audio (Low Latency Mode)» или «(Exclusive Mode)» и самый маленький буфер без треска, затем измерьте снова." },
+    { "You play about", "Вы играете примерно на" },
+    { "ms after every note. The sound probably reaches you late: Settings > MIDI and audio > Measure delay.",
+      "мс позже каждой ноты. Похоже, звук доходит до вас с задержкой: Настройки > MIDI и аудио > «Измерить задержку»." },
 };
 
 juce::String escape (const char* text)

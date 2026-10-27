@@ -44,6 +44,25 @@ struct PracticeSnapshot
     std::string lastVerdict;
     int countInBeat = 0;  ///< 1-based click of a running count-in, 0 when none
     int countInBeats = 0;
+
+    /** Latency test: clicks to press along with, and the measured delay. */
+    struct LatencyTest
+    {
+        bool active = false;
+        bool done = false;     ///< finished with a result
+        bool failed = false;   ///< finished, too few presses matched a click
+        int clicks = 0;        ///< clicks played so far
+        int totalClicks = 0;
+        int matched = 0;       ///< presses that matched a click
+        double resultMs = 0.0; ///< median press minus click
+        double spreadMs = 0.0; ///< interquartile range
+    } latencyTest;
+
+    /** The player is late by about the same amount on every note: most likely
+        the sound reaches them late. seq changes each time it is detected. */
+    double steadyLateMs = 0.0;
+    std::uint32_t steadyLateSeq = 0;
+    double inputOffsetMs = 0.0;
 };
 
 /** The control thread. Owns transport transitions and gate decisions: user
@@ -82,6 +101,12 @@ public:
     void previewKey (std::uint8_t pitch, bool down); ///< a click on the on-screen keyboard
     /** One bar of clicks before Play and before each loop repeat. */
     void setCountIn (bool on);
+    /** Presses are counted this much earlier (sound and input delay). Live. */
+    void setInputOffset (double ms);
+    /** Stops the song and clicks once a second; the player presses any key
+        on each click. The result appears in the snapshot. */
+    void startLatencyTest();
+    void stopLatencyTest();
 
     PracticeSnapshot snapshot() const;
 
@@ -101,8 +126,12 @@ private:
     struct SetLoop { bool enabled; double start; double end; };
     struct SetPartGains { std::vector<double> gains; };
     struct SetCountIn { bool on; };
+    struct SetInputOffset { double ms; };
+    struct StartLatencyTest {};
+    struct StopLatencyTest {};
     using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, SetAccompaniment,
-                                SetMutedParts, PreviewKey, SetTempo, SetLoop, SetPartGains, SetCountIn>;
+                                SetMutedParts, PreviewKey, SetTempo, SetLoop, SetPartGains, SetCountIn, SetInputOffset,
+                                StartLatencyTest, StopLatencyTest>;
 
     void post (Intent intent);
     void hiResTimerCallback() override;
@@ -120,6 +149,12 @@ private:
     void handleInput (const midi_io::InputEvent& event, const AudioService::Snapshot& audio);
     void publish (const AudioService::Snapshot& audio);
     void logTransport (const char* message, const AudioService::Snapshot& audio);
+    /** Every few seconds while the song runs, and when it stops: audio
+        timing, what each track played, and how the presses landed. */
+    void logHealth (const char* why);
+    void tickLatencyTest();
+    void finishLatencyTest (const char* why);
+    std::string channelNames (int channel) const;
 
     diagnostics::RotatingLog& log_;
     AudioService& audio_;
@@ -157,6 +192,34 @@ private:
     audio::PlaybackState lastState_ = audio::PlaybackState::stopped;
     std::deque<std::pair<std::uint8_t, std::int64_t>> wrong_;
     std::string lastVerdict_;
+
+    // Timing statistics for the log and the "steadily late" hint.
+    std::deque<double> recentOffsets_;  ///< last presses that passed a note, ms
+    std::vector<double> windowOffsets_; ///< since the last health entry
+    std::vector<double> windowProcMs_;  ///< MIDI arrival to judged, ms
+    int windowWrong_ = 0;
+    int windowStalls_ = 0;
+    double windowStallMs_ = 0.0;
+    std::int64_t lastHealthMicros_ = 0;
+    bool hintGiven_ = false;
+    double steadyLateMs_ = 0.0;
+    std::uint32_t steadyLateSeq_ = 0;
+
+    struct LatencyRun
+    {
+        bool active = false;
+        bool done = false;
+        bool failed = false;
+        std::int64_t startMicros = 0;
+        int sent = 0;
+        std::int64_t offDueMicros = -1;
+        std::int64_t lastSeenPreview = 0;
+        std::vector<std::int64_t> clicks; ///< when each click left for the output
+        std::vector<std::int64_t> taps;
+        double resultMs = 0.0;
+        double spreadMs = 0.0;
+        int matched = 0;
+    } latency_;
 
     mutable std::mutex snapshotMutex_;
     PracticeSnapshot snapshot_;

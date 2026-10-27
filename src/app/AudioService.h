@@ -39,6 +39,21 @@ public:
         double rate = 1.0;                 ///< tempo: song seconds per real second
     };
 
+    /** Audio thread timing since the last call, for the log: how long the
+        callbacks took against their budget, the longest gap between two
+        callbacks, and per MIDI channel how many notes were started. */
+    struct Health
+    {
+        std::uint64_t callbacks = 0;
+        double avgCallbackMs = 0.0;
+        double maxCallbackMs = 0.0;
+        double budgetMs = 0.0;         ///< one block at the device rate
+        std::uint64_t overBudget = 0;  ///< callbacks slower than their block
+        double maxGapMs = 0.0;         ///< longest time between two callbacks
+        int xruns = -1;                ///< device-reported glitches, -1 when unknown
+        std::array<std::uint32_t, 16> channelNotes {};
+    };
+
     static std::int64_t nowMicros() noexcept;
 
     explicit AudioService (diagnostics::RotatingLog& log);
@@ -70,6 +85,15 @@ public:
 
     Snapshot snapshot() const;
     std::string deviceDescription() const;
+    Health takeHealth();
+    /** Wall time of the block that started the last previewed key: the
+        reference for the latency test. */
+    std::int64_t lastPreviewMicros() const noexcept { return lastPreviewMicros_.load (std::memory_order_acquire); }
+    /** Buffer plus the latency the driver reports, in milliseconds. Drivers
+        often leave out what virtual devices and wireless headphones add. */
+    double reportedOutputLatencyMs() const;
+    /** Device types and devices, for the log. */
+    std::string availableDevices();
 
     /** Frees event lists and instruments the audio thread no longer uses.
         Call from a timer on the message thread. */
@@ -143,6 +167,16 @@ private:
     std::atomic<std::uint64_t> gateArrivals_ { 0 };
     std::atomic<std::int64_t> arrivalMicros_ { 0 };
     std::atomic<double> rate_ { 1.0 };
+
+    // Health counters: written by the audio thread, taken by the lesson thread.
+    std::atomic<std::uint64_t> healthCallbacks_ { 0 };
+    std::atomic<std::uint64_t> healthMicrosSum_ { 0 };
+    std::atomic<std::int64_t> healthMaxMicros_ { 0 };
+    std::atomic<std::uint64_t> healthOverBudget_ { 0 };
+    std::atomic<std::int64_t> healthMaxGapMicros_ { 0 };
+    std::array<std::atomic<std::uint32_t>, 16> channelNotes_ {};
+    std::int64_t lastCallbackMicros_ = 0; // audio thread only
+    std::atomic<std::int64_t> lastPreviewMicros_ { 0 };
 };
 
 } // namespace pianoassist::app

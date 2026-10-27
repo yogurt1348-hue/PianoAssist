@@ -8,7 +8,7 @@ Severity: **high** blocks practice, **medium** degrades it, **low** is cosmetic 
 | 2 | VST3 instruments run inside the app. Scanning is done in a separate process, so a plug-in that crashes while being scanned is skipped, but one that crashes while playing or in its window closes PianoAssist. | medium | Song settings are saved 1.5 s after each change, so little is lost. Choose another sound for that track; send the log. |
 | 3 | Tempo change is MIDI tempo only (25–200%); there is no audio time-stretch, and no WAV/MP3 backing tracks. | low | — |
 | 4 | Only VST3 plug-ins (no VST2, AU, CLAP). The main VST3 instrument does not get the drums (channel 10). | low | Give the drum track its own sound (a General MIDI SoundFont) in the track list. |
-| 5 | No automatic input-latency calibration. | low | Settings → MIDI and audio → input delay, or "Easy" timing. |
+| 5 | Sound delay is measured by the player (click test), not automatically: drivers do not report what virtual devices (SteelSeries Sonar) and wireless headphones add. The app warns when presses are steadily late. ASIO is not built in. | medium | Settings → MIDI and audio → Measure delay; choose a real output and "Windows Audio (Low Latency Mode)". |
 | 6 | Installer and exe are not code-signed, so SmartScreen and "unknown publisher" warnings are expected. | low | See `docs/windows-warnings.md` (check SHA-256). |
 | 7 | One MIDI input at a time; no MIDI output to the piano's own sounds. | low | Use the app's sound through speakers or headphones. |
 | 8 | No sounds are bundled (licences). The built-in synth is the default. | medium | Load a free SoundFont or VST3 from `docs/sounds.md`. |

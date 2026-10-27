@@ -36,9 +36,26 @@ public:
         std::string audioDescription;
     };
 
+    /** The latency test on the MIDI and audio page. */
+    struct LatencyView
+    {
+        bool active = false;
+        bool done = false;
+        bool failed = false;
+        int clicks = 0;
+        int totalClicks = 0;
+        int matched = 0;
+        double resultMs = 0.0;
+        double spreadMs = 0.0;
+        double reportedOutputMs = 0.0; ///< what the driver reports: buffer plus output latency
+        std::string device;
+    };
+
     struct Intents
     {
         std::function<void (const std::string& identifier)> selectInput;
+        std::function<void()> startLatencyTest;
+        std::function<void()> stopLatencyTest;
         std::function<void()> rescanInputs;
         std::function<void (double ms)> inputOffsetChanged;
         std::function<void()> audioDeviceChanged; ///< save the output choice
@@ -73,6 +90,7 @@ public:
     void setValues (const Values& values);
     void setInputMonitor (const InputMonitorView& view);
     void setSound (const SoundView& view);
+    void setLatency (const LatencyView& view);
 
     void paint (juce::Graphics& g) override;
     void resized() override;

@@ -592,8 +592,13 @@ private:
         i.inputOffsetChanged = [this] (double ms) {
             settings_.calibration.inputOffsetMs = ms;
             saveSettings();
-            showRestartNote (TRANS ("The new input delay is used after PianoAssist is restarted."));
+            lesson_->setInputOffset (ms); // used from the next press on
         };
+        i.startLatencyTest = [this] {
+            log_->write (LogLevel::info, "ui", "User started the latency test");
+            lesson_->startLatencyTest();
+        };
+        i.stopLatencyTest = [this] { lesson_->stopLatencyTest(); };
         i.audioDeviceChanged = [this] {
             const auto xml = audio_->deviceStateXml();
             if (xml.size() <= 16 * 1024 && xml != settings_.audio.deviceStateXml)
@@ -1519,6 +1524,30 @@ private:
         content_->setTransport (view);
 
         const auto practice = lesson_->snapshot();
+        if (settings_ui_ != nullptr)
+        {
+            ui::SettingsComponent::LatencyView lv;
+            const auto& t = practice.latencyTest;
+            lv.active = t.active;
+            lv.done = t.done;
+            lv.failed = t.failed;
+            lv.clicks = t.clicks;
+            lv.totalClicks = t.totalClicks;
+            lv.matched = t.matched;
+            lv.resultMs = t.resultMs;
+            lv.spreadMs = t.spreadMs;
+            lv.reportedOutputMs = audio_->reportedOutputLatencyMs();
+            lv.device = audio_->deviceDescription();
+            settings_ui_->setLatency (lv);
+        }
+        if (practice.steadyLateSeq != steadyLateSeen_)
+        {
+            steadyLateSeen_ = practice.steadyLateSeq;
+            content_->showToast (TRANS ("You play about") + " " + juce::String (juce::roundToInt (practice.steadyLateMs)) + " "
+                                 + TRANS ("ms after every note. The sound probably reaches you late: Settings > MIDI and audio > "
+                                          "Measure delay."),
+                                 20000);
+        }
         ui::PracticeView pv;
         pv.practising = practice.practising;
         pv.mode = static_cast<int> (practice.mode);
@@ -1570,6 +1599,7 @@ private:
     ui::MainComponent* content_ = nullptr; // owned by window_
     std::unique_ptr<ToolWindow> settingsWindow_;
     ui::SettingsComponent* settings_ui_ = nullptr; // owned by settingsWindow_
+    std::uint32_t steadyLateSeen_ = 0;
     std::unique_ptr<ToolWindow> helpWindow_;
     std::unique_ptr<ToolWindow> libraryWindow_;
     ui::LibraryComponent* library_ui_ = nullptr; // owned by libraryWindow_

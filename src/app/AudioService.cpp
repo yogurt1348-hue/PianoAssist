@@ -1,5 +1,7 @@
 #include "app/AudioService.h"
 
+#include <algorithm>
+
 namespace pianoassist::app
 {
 namespace
@@ -15,6 +17,9 @@ public:
     void prepare (double, int) override {}
     void render (std::span<const audio::ScheduledMidiEvent> events, audio::RenderBlock block) noexcept override
     {
+        for (const auto& e : events)
+            if ((e.status & 0xf0) == 0x90 && e.data2 > 0)
+                owner_.channelNotes_[e.status & 0x0f].fetch_add (1, std::memory_order_relaxed);
         owner_.router_.render (*owner_.lastRouting_, events, block);
     }
     void allNotesOff() noexcept override { forEach ([] (auto& r) { r.allNotesOff(); }); }
@@ -76,6 +81,18 @@ std::string AudioService::start (const std::string& savedStateXml)
     deviceManager_.addChangeListener (this);
     deviceManager_.addAudioCallback (this);
     log_.write (LogLevel::info, "audio", "Audio output ready", { { "device", deviceDescription() } });
+    if (auto* device = deviceManager_.getCurrentAudioDevice())
+    {
+        juce::StringArray sizes, rates;
+        for (auto size : device->getAvailableBufferSizes())
+            sizes.add (juce::String (size));
+        for (auto rate : device->getAvailableSampleRates())
+            rates.add (juce::String (static_cast<int> (rate)));
+        log_.write (LogLevel::info, "audio", "Audio output options",
+                    { { "bufferSizes", sizes.joinIntoString (" ").toStdString() },
+                      { "sampleRates", rates.joinIntoString (" ").toStdString() },
+                      { "devices", availableDevices() } });
+    }
     return {};
 }
 
@@ -310,9 +327,20 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
         lastRouting_ = routing;
         engine_.queuePrograms();
     }
+    if (lastCallbackMicros_ > 0)
+    {
+        const auto gap = blockStart - lastCallbackMicros_;
+        if (gap > healthMaxGapMicros_.load (std::memory_order_relaxed))
+            healthMaxGapMicros_.store (gap, std::memory_order_relaxed);
+    }
+    lastCallbackMicros_ = blockStart;
     auto* instrument = routed_.get();
     while (const auto command = commands_.pop())
+    {
+        if (command->type == audio::PlaybackCommand::Type::preview && command->value > 0.0)
+            lastPreviewMicros_.store (blockStart, std::memory_order_release);
         engine_.handle (*command, *instrument);
+    }
 
     const auto startPosition = engine_.positionSeconds();
     engine_.process (*instrument, { outputs, numOutputs, numSamples });
@@ -343,6 +371,54 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
     activeListId_.store (engine_.activeListId(), std::memory_order_release);
     activeVoices_.store (instrument->activeVoiceCount(), std::memory_order_relaxed);
     blocksRendered_.fetch_add (1, std::memory_order_release);
+
+    const auto took = nowMicros() - blockStart;
+    healthCallbacks_.fetch_add (1, std::memory_order_relaxed);
+    healthMicrosSum_.fetch_add (static_cast<std::uint64_t> (std::max<std::int64_t> (took, 0)), std::memory_order_relaxed);
+    if (took > healthMaxMicros_.load (std::memory_order_relaxed))
+        healthMaxMicros_.store (took, std::memory_order_relaxed);
+    const auto rate = deviceRate_.load (std::memory_order_relaxed);
+    if (rate > 0.0 && static_cast<double> (took) > numSamples * 1.0e6 / rate)
+        healthOverBudget_.fetch_add (1, std::memory_order_relaxed);
+}
+
+AudioService::Health AudioService::takeHealth()
+{
+    Health h;
+    h.callbacks = healthCallbacks_.exchange (0, std::memory_order_relaxed);
+    const auto sum = healthMicrosSum_.exchange (0, std::memory_order_relaxed);
+    h.avgCallbackMs = h.callbacks > 0 ? static_cast<double> (sum) / static_cast<double> (h.callbacks) / 1000.0 : 0.0;
+    h.maxCallbackMs = static_cast<double> (healthMaxMicros_.exchange (0, std::memory_order_relaxed)) / 1000.0;
+    h.overBudget = healthOverBudget_.exchange (0, std::memory_order_relaxed);
+    h.maxGapMs = static_cast<double> (healthMaxGapMicros_.exchange (0, std::memory_order_relaxed)) / 1000.0;
+    const auto rate = deviceRate_.load();
+    h.budgetMs = rate > 0.0 ? deviceBlock_.load() * 1000.0 / rate : 0.0;
+    for (std::size_t ch = 0; ch < 16; ++ch)
+        h.channelNotes[ch] = channelNotes_[ch].exchange (0, std::memory_order_relaxed);
+    if (auto* device = deviceManager_.getCurrentAudioDevice())
+        h.xruns = device->getXRunCount();
+    return h;
+}
+
+double AudioService::reportedOutputLatencyMs() const
+{
+    auto* device = deviceManager_.getCurrentAudioDevice();
+    if (device == nullptr || device->getCurrentSampleRate() <= 0.0)
+        return 0.0;
+    const auto frames = device->getOutputLatencyInSamples() + device->getCurrentBufferSizeSamples();
+    return frames * 1000.0 / device->getCurrentSampleRate();
+}
+
+std::string AudioService::availableDevices()
+{
+    std::string text;
+    for (auto* type : deviceManager_.getAvailableDeviceTypes())
+    {
+        type->scanForDevices();
+        text += (text.empty() ? "" : "; ") + type->getTypeName().toStdString() + ": "
+                + type->getDeviceNames (false).joinIntoString (", ").toStdString();
+    }
+    return text;
 }
 
 } // namespace pianoassist::app
