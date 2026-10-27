@@ -25,6 +25,16 @@ jobs:
         run: cmake --build --preset windows-x64-${{ matrix.config == 'Debug' && 'debug' || 'release' }} --parallel
       - name: Test
         run: ctest --preset windows-x64-${{ matrix.config == 'Debug' && 'debug' || 'release' }}
+      - name: Check the exe needs no Visual C++ runtime DLLs
+        shell: pwsh
+        run: |
+          $exe = "build/windows-x64/src/app/PianoAssistApp_artefacts/${{ matrix.config }}/PianoAssist.exe"
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $deps = & $dumpbin.FullName /dependents $exe | Select-String -Pattern '\.dll' | ForEach-Object { $_.Line.Trim() }
+          $deps | ForEach-Object { Write-Host "  $_" }
+          $runtime = $deps | Where-Object { $_ -match '^(vcruntime|msvcp|ucrtbase|api-ms-win-crt)' }
+          if ($runtime) { Write-Error "PianoAssist.exe depends on runtime DLLs: $runtime"; exit 1 }
       - name: Package app
         shell: pwsh
         run: |

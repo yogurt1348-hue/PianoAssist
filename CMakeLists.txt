@@ -9,6 +9,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Link the MSVC runtime statically (/MT, /MTd in Debug) into every target,
+# including the fetched dependencies, so both test builds start on a clean
+# Windows machine without the Visual C++ Redistributable or the debug runtime
+# DLLs (VCRUNTIME140D.dll, MSVCP140D.dll, ucrtbased.dll) that only Visual
+# Studio installs.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 # The domain libraries (smf, timeline, transport, lesson_engine, settings,
 # diagnostics, midi_io types, audio interfaces) never depend on JUCE, so the
 # tests can be built and run on any machine without a window or audio device.
