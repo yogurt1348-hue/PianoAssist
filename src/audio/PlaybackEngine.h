@@ -60,6 +60,10 @@ public:
     static constexpr std::size_t maxEventsPerBlock = 2048;
 
     void prepare (double sampleRate) noexcept;
+    /** Queues each channel's program for the next block; call after the
+        instrument changes. */
+    void queuePrograms() noexcept;
+
     void handle (const PlaybackCommand& command, IInstrumentRenderer& renderer) noexcept;
     void process (IInstrumentRenderer& renderer, RenderBlock block) noexcept;
 

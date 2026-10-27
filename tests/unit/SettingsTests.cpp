@@ -29,6 +29,8 @@ Settings customSettings()
     s.practice.mode = lesson::PracticeMode::leftHand;
     s.practice.accompaniment.playOtherPianoPart = false;
     s.practice.accompaniment.playBacking = false;
+    s.sound.kind = "soundFont";
+    s.sound.soundFontPath = "C:\\Users\\Илья\\Music\\GeneralUser GS.sf2";
     return s;
 }
 } // namespace
@@ -126,4 +128,12 @@ TEST_CASE ("Practice choices are optional and validated")
     CHECK (bad.status == LoadStatus::recovered);
     CHECK (bad.settings.practice.mode == lesson::PracticeMode::bothHands);
     CHECK_FALSE (bad.settings.practice.accompaniment.playBacking);
+}
+
+TEST_CASE ("Unknown instrument kinds fall back to the built-in synth")
+{
+    const auto loaded = fromJson (R"({"schemaVersion": 1, "sound": {"kind": "vst2", "pluginName": "X"}})");
+    CHECK (loaded.status == LoadStatus::recovered);
+    CHECK (loaded.settings.sound.kind == "builtIn");
+    CHECK (loaded.settings.sound.pluginName == "X");
 }

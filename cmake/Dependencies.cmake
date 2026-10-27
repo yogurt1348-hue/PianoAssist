@@ -13,6 +13,13 @@ set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(nlohmann_json)
 
+# TinySoundFont (MIT): SoundFont (.sf2) playback in the JUCE-free audio
+# module. Header-only; pinned to a commit because the project has no tags.
+FetchContent_Declare(tinysoundfont
+    GIT_REPOSITORY https://github.com/schellingb/TinySoundFont.git
+    GIT_TAG        853a0a171759f1ddba0de1442133a75912bbeffa)
+FetchContent_MakeAvailable(tinysoundfont)
+
 if(PIANOASSIST_BUILD_TESTS)
     # Catch2 (BSL-1.0): test executable only, never shipped.
     FetchContent_Declare(Catch2

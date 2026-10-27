@@ -2,6 +2,7 @@
 
 #include "timeline/Song.h"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -25,6 +26,10 @@ struct PlaybackEventList
     std::vector<PlaybackEvent> events;
     double durationSeconds = 0.0;
     std::uint64_t id = 0; ///< lets the control thread see which list the audio thread uses
+    /** GM program (0-127) per channel from the song's parts, -1 when none.
+        Sent to the instrument whenever the list or the instrument changes,
+        so seeking never loses the sound of a channel. */
+    std::array<std::int16_t, 16> programs { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
 };
 
 /** includeRole decides which notes sound; sustain events always pass. */

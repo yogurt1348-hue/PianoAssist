@@ -67,6 +67,15 @@ void PlaybackEngine::releaseOwned (int sampleOffset) noexcept
     sustainOwned_.reset();
 }
 
+void PlaybackEngine::queuePrograms() noexcept
+{
+    if (events_ == nullptr)
+        return;
+    for (std::uint8_t channel = 0; channel < 16; ++channel)
+        if (const auto program = events_->programs[channel]; program >= 0)
+            queueEvent ({ 0, static_cast<std::uint8_t> (0xC0u | channel), static_cast<std::uint8_t> (program), 0 });
+}
+
 void PlaybackEngine::moveTo (double seconds) noexcept
 {
     anchorSeconds_ = std::max (0.0, seconds);
@@ -90,6 +99,7 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
         case Type::setEvents:
             releaseOwned (0);
             events_ = command.events;
+            queuePrograms();
             state_ = PlaybackState::stopped;
             moveTo (0.0);
             break;

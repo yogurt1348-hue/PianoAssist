@@ -37,6 +37,8 @@ public:
     virtual void allNotesOff() noexcept = 0;
     virtual void silence() noexcept = 0;
     virtual int reportedLatencyFrames() const noexcept = 0;
+    /** Voices still sounding, for the "may ring out" note; 0 when unknown. */
+    virtual int activeVoiceCount() const noexcept { return 0; }
 };
 
 } // namespace pianoassist::audio

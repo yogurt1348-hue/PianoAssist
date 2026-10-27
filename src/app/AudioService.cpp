@@ -120,8 +120,37 @@ AudioService::Snapshot AudioService::snapshot() const
     return s;
 }
 
+std::pair<double, int> AudioService::renderFormat() const
+{
+    return { deviceRate_.load(), deviceBlock_.load() };
+}
+
+void AudioService::setInstrument (std::unique_ptr<audio::IInstrumentRenderer> instrument)
+{
+    const auto [rate, block] = renderFormat();
+    if (instrument)
+        instrument->prepare (rate, block);
+    auto* next = instrument ? instrument.get() : static_cast<audio::IInstrumentRenderer*> (&synth_);
+    active_.store (next, std::memory_order_release);
+    if (external_)
+        retiredInstruments_.emplace_back (std::move (external_), blocksRendered_.load());
+    external_ = std::move (instrument);
+    log_.write (LogLevel::info, "audio", "Instrument switched",
+                { { "latencyFrames", std::to_string (next->reportedLatencyFrames()) },
+                  { "rate", std::to_string (static_cast<int> (rate)) }, { "block", std::to_string (block) } });
+}
+
 void AudioService::collectGarbage()
 {
+    {
+        // An instrument retired at block N may still be in use during N and
+        // gets its silence() call in N + 1; after that nobody touches it.
+        const auto blocks = blocksRendered_.load();
+        const bool deviceRunning = deviceOpen_.load();
+        std::erase_if (retiredInstruments_, [blocks, deviceRunning] (const auto& entry) {
+            return ! deviceRunning || blocks >= entry.second + 2;
+        });
+    }
     {
         std::scoped_lock lock (listsMutex_);
         if (current_ && activeListId_.load() == current_->id)
@@ -135,7 +164,13 @@ void AudioService::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     // Called before the callback runs, so touching the engine here is safe.
     const auto rate = device->getCurrentSampleRate();
-    synth_.prepare (rate, device->getCurrentBufferSizeSamples());
+    const auto block = device->getCurrentBufferSizeSamples();
+    deviceRate_.store (rate);
+    deviceBlock_.store (block);
+    synth_.prepare (rate, block);
+    if (external_)
+        external_->prepare (rate, block);
+    lastUsed_ = active_.load(); // the previous one may already be deleted
     engine_.prepare (rate);
     gain_.reset (rate, 0.02);
     gain_.setCurrentAndTargetValue (targetGain_.load());
@@ -162,11 +197,20 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
 {
     // Audio thread: no allocation, locks, logging or file access.
     const auto blockStart = nowMicros();
+    auto* instrument = active_.load (std::memory_order_acquire);
+    if (instrument != lastUsed_)
+    {
+        // New instrument: the old one falls silent, the new one learns the
+        // channel programs. Notes the old one was playing are dropped.
+        lastUsed_->silence();
+        lastUsed_ = instrument;
+        engine_.queuePrograms();
+    }
     while (const auto command = commands_.pop())
-        engine_.handle (*command, synth_);
+        engine_.handle (*command, *instrument);
 
     const auto startPosition = engine_.positionSeconds();
-    engine_.process (synth_, { outputs, numOutputs, numSamples });
+    engine_.process (*instrument, { outputs, numOutputs, numSamples });
     const auto seq = blockSeq_.load (std::memory_order_relaxed);
     blockSeq_.store (seq + 1, std::memory_order_relaxed);
     std::atomic_thread_fence (std::memory_order_release);
@@ -191,7 +235,8 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
     position_.store (engine_.positionSeconds(), std::memory_order_relaxed);
     state_.store (static_cast<int> (engine_.state()), std::memory_order_relaxed);
     activeListId_.store (engine_.activeListId(), std::memory_order_release);
-    activeVoices_.store (synth_.activeVoiceCount(), std::memory_order_relaxed);
+    activeVoices_.store (instrument->activeVoiceCount(), std::memory_order_relaxed);
+    blocksRendered_.fetch_add (1, std::memory_order_release);
 }
 
 } // namespace pianoassist::app

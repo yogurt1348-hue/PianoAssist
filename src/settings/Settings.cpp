@@ -121,6 +121,11 @@ std::string toJson (const Settings& s)
             { "requireExactPitch", s.practiceProfile.requireExactPitch } } },
         { "visual", { { "pixelsPerSecond", s.visual.pixelsPerSecond }, { "showNoteNames", s.visual.showNoteNames } } },
         { "calibration", { { "inputOffsetMs", s.calibration.inputOffsetMs } } },
+        { "sound",
+          { { "kind", s.sound.kind },
+            { "pluginId", s.sound.pluginId },
+            { "pluginName", s.sound.pluginName },
+            { "soundFontPath", s.sound.soundFontPath } } },
         { "practice",
           { { "mode", modeKey (s.practice.mode) },
             { "playOtherPianoPart", s.practice.accompaniment.playOtherPianoPart },
@@ -187,6 +192,14 @@ LoadResult fromJson (std::string_view text)
     s.practice.mode = modeFromKey (mode).value_or (lesson::PracticeMode::bothHands);
     reader.read ("practice", "playOtherPianoPart", s.practice.accompaniment.playOtherPianoPart);
     reader.read ("practice", "playBacking", s.practice.accompaniment.playBacking);
+
+    reader.read ("sound", "kind", s.sound.kind, [] (const std::string& kind) {
+        return kind == "builtIn" || kind == "soundFont" || kind == "plugin";
+    });
+    const auto bounded = [] (const std::string& value) { return value.size() <= 4096; };
+    reader.read ("sound", "pluginId", s.sound.pluginId, bounded);
+    reader.read ("sound", "pluginName", s.sound.pluginName, bounded);
+    reader.read ("sound", "soundFontPath", s.sound.soundFontPath, bounded);
 
     result.status = result.warnings.empty() ? LoadStatus::loaded : LoadStatus::recovered;
     return result;

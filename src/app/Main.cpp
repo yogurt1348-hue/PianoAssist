@@ -1,5 +1,6 @@
 #include "app/AppPaths.h"
 #include "app/AudioService.h"
+#include "app/InstrumentService.h"
 #include "app/LessonController.h"
 #include "app/MidiInputService.h"
 #include "app/SongLoader.h"
@@ -244,6 +245,18 @@ public:
                 saveSettings();
             },
             [this] (std::size_t part, int assignment) { reassignPart (part, assignment); },
+            [this] (int id) {
+                if (id == ui::SoundView::builtIn)
+                    instruments_->chooseBuiltIn();
+                else if (id >= ui::SoundView::firstPlugin)
+                    instruments_->choosePlugin (static_cast<std::size_t> (id - ui::SoundView::firstPlugin));
+                else if (id == ui::SoundView::soundFont && ! settings_.sound.soundFontPath.empty())
+                    instruments_->chooseSoundFont (pathFromUtf8 (settings_.sound.soundFontPath));
+            },
+            [this] { chooseSoundFont(); },
+            [this] { choosePluginFile(); },
+            [this] { instruments_->startScan(); },
+            [this] { instruments_->showEditor(); },
         });
         content_ = content;
         content->setPixelsPerSecond (settings_.visual.pixelsPerSecond);
@@ -264,6 +277,10 @@ public:
         settings_.practiceProfile = lesson::profileFor (lesson::toleranceOf (settings_.practiceProfile));
         lesson_ = std::make_unique<LessonController> (*log_, *audio_, midi_->lessonQueue(), settings_.practiceProfile,
                                                       settings_.calibration.inputOffsetMs);
+        instruments_ = std::make_unique<InstrumentService> (*log_, *audio_, settings_.sound, [this] { saveSettings(); });
+        instruments_->onChange = [this] { content_->setSound (instruments_->view()); };
+        instruments_->restore();
+        content_->setSound (instruments_->view());
         lesson_->setMode (settings_.practice.mode);
         lesson_->setAccompaniment (settings_.practice.accompaniment);
         lesson_->start();
@@ -289,6 +306,9 @@ public:
         stopTimer();
         chooser_.reset();
         lesson_.reset();
+        if (instruments_ != nullptr)
+            instruments_->saveState();
+        instruments_.reset();
         audio_.reset();
         midi_.reset();
         window_.reset();
@@ -407,6 +427,33 @@ private:
                                });
     }
 
+    void chooseSoundFont()
+    {
+        log_->write (LogLevel::info, "ui", "User pressed Load SoundFont");
+        chooser_ = std::make_unique<juce::FileChooser> ("Load a SoundFont", lastFolder_, "*.sf2");
+        chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                               [this] (const juce::FileChooser& chooser) {
+                                   const auto file = chooser.getResult();
+                                   if (file != juce::File())
+                                       instruments_->chooseSoundFont (pathFromUtf8 (file.getFullPathName().toStdString()));
+                               });
+    }
+
+    void choosePluginFile()
+    {
+        log_->write (LogLevel::info, "ui", "User pressed Add VST3 instrument file");
+        const auto folder = juce::File::getSpecialLocation (juce::File::globalApplicationsDirectory)
+                                .getChildFile ("Common Files").getChildFile ("VST3");
+        chooser_ = std::make_unique<juce::FileChooser> ("Add a VST3 instrument", folder, "*.vst3");
+        chooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                   | juce::FileBrowserComponent::canSelectDirectories,
+                               [this] (const juce::FileChooser& chooser) {
+                                   const auto file = chooser.getResult();
+                                   if (file != juce::File())
+                                       instruments_->addPluginFile (file);
+                               });
+    }
+
     void reassignPart (std::size_t part, int assignment)
     {
         if (song_ == nullptr || assignment < 0 || assignment > 3)
@@ -503,6 +550,7 @@ private:
     ui::InputMonitorView lastInputView_;
     std::unique_ptr<AudioService> audio_;
     std::unique_ptr<LessonController> lesson_;
+    std::unique_ptr<InstrumentService> instruments_;
     std::string audioError_;
 };
 

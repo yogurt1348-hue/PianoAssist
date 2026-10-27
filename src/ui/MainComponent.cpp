@@ -119,6 +119,29 @@ MainComponent::MainComponent (Intents intents)
     timeLabel_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
     transportNote_.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
     transportNote_.setFont (juce::FontOptions (13.0f));
+    soundLabel_.setText ("Sound", juce::dontSendNotification);
+    soundBox_.setTitle ("Sound");
+    soundBox_.setTooltip ("What the song sounds like: built-in synth, a SoundFont (.sf2) or a VST3 instrument");
+    soundBox_.onChange = [this] {
+        const int id = soundBox_.getSelectedId();
+        constexpr int loadFont = 900, addFile = 901, scan = 902;
+        // Action items are not selections: restore the shown choice first.
+        if (id == loadFont || id == addFile || id == scan)
+        {
+            soundBox_.setSelectedId (sound_.selected, juce::dontSendNotification);
+            const auto action = id == loadFont ? intents_.loadSoundFont : id == addFile ? intents_.addPluginFile : intents_.scanPlugins;
+            juce::MessageManager::callAsync ([action] { if (action) action(); });
+            return;
+        }
+        if (id > 0 && id != sound_.selected && intents_.soundChosen)
+            intents_.soundChosen (id);
+    };
+    instrumentWindowButton_.setTooltip ("Open the VST3 instrument's own window (sounds, presets)");
+    instrumentWindowButton_.onClick = [this] { if (intents_.showInstrumentWindow) intents_.showInstrumentWindow(); };
+    for (auto* c : std::initializer_list<juce::Component*> { &soundLabel_, &soundBox_, &instrumentWindowButton_ })
+        addAndMakeVisible (c);
+    setSound ({});
+
     for (auto* c : std::initializer_list<juce::Component*> { &playButton_, &stopButton_, &silenceButton_, &volume_,
                                                               &volumeLabel_, &timeLabel_, &transportNote_ })
         addAndMakeVisible (c);
@@ -197,6 +220,29 @@ void MainComponent::setTransport (const TransportView& view)
     transportNote_.setColour (juce::Label::textColourId, view.audioAvailable ? juce::Colours::lightgrey : juce::Colours::orange);
 
     roll_.setPlayhead (view.positionSeconds, running);
+}
+
+void MainComponent::setSound (const SoundView& view)
+{
+    sound_ = view;
+    soundBox_.clear (juce::dontSendNotification);
+    soundBox_.addItem ("Built-in synth", SoundView::builtIn);
+    if (! view.soundFontName.empty())
+        soundBox_.addItem ("SoundFont: " + toJuce (view.soundFontName), SoundView::soundFont);
+    if (! view.plugins.empty())
+        soundBox_.addSectionHeading ("VST3 instruments");
+    for (std::size_t i = 0; i < view.plugins.size(); ++i)
+        soundBox_.addItem (toJuce (view.plugins[i]), SoundView::firstPlugin + static_cast<int> (i));
+    soundBox_.addSeparator();
+    soundBox_.addItem ("Load SoundFont (.sf2)...", 900);
+    soundBox_.addItem ("Add VST3 instrument file...", 901);
+    soundBox_.addItem (view.scanning ? "Scanning..." : "Find VST3 instruments", 902);
+    soundBox_.setItemEnabled (902, ! view.scanning);
+    soundBox_.setSelectedId (view.selected, juce::dontSendNotification);
+    soundBox_.setTooltip (view.status.empty() ? juce::String ("What the song sounds like") : toJuce (view.status));
+    instrumentWindowButton_.setEnabled (view.canEdit);
+    if (! view.status.empty())
+        transportNote_.setTooltip (toJuce (view.status));
 }
 
 void MainComponent::setPractice (const PracticeView& view)
@@ -435,6 +481,11 @@ void MainComponent::resized()
     silenceButton_.setBounds (transportBar.removeFromLeft (80));
     transportBar.removeFromLeft (12);
     timeLabel_.setBounds (transportBar.removeFromLeft (120));
+    soundLabel_.setBounds (transportBar.removeFromLeft (50));
+    soundBox_.setBounds (transportBar.removeFromLeft (220));
+    transportBar.removeFromLeft (6);
+    instrumentWindowButton_.setBounds (transportBar.removeFromLeft (100));
+    transportBar.removeFromLeft (10);
     volume_.setBounds (transportBar.removeFromRight (160));
     volumeLabel_.setBounds (transportBar.removeFromRight (60));
     transportNote_.setBounds (transportBar);

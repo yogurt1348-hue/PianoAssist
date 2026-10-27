@@ -10,8 +10,10 @@ target_sources(PianoAssistApp PRIVATE
     MidiInputService.cpp
     SongLoader.cpp
     LessonController.cpp
+    InstrumentService.cpp
     AudioService.cpp
     ${PROJECT_SOURCE_DIR}/src/audio/InternalSynthRenderer.cpp
+    ${PROJECT_SOURCE_DIR}/src/audio/PluginInstrumentRenderer.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/MainComponent.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/PianoRollComponent.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/KeyboardStrip.cpp
@@ -22,7 +24,8 @@ target_compile_definitions(PianoAssistApp PRIVATE
     JUCE_USE_CURL=0
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:PianoAssistApp,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:PianoAssistApp,JUCE_VERSION>"
-    JUCE_DISPLAY_SPLASH_SCREEN=0)
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_PLUGINHOST_VST3=1)
 
 target_link_libraries(PianoAssistApp
     PRIVATE
@@ -35,6 +38,7 @@ target_link_libraries(PianoAssistApp
         PianoAssist::lesson_engine
         juce::juce_gui_basics
         juce::juce_audio_devices
+        juce::juce_audio_processors
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags)

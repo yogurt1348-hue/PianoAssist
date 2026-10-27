@@ -58,8 +58,19 @@ public:
     Snapshot snapshot() const;
     std::string deviceDescription() const;
 
-    /** Frees event lists the audio thread no longer uses. Call from a timer. */
+    /** Frees event lists and instruments the audio thread no longer uses.
+        Call from a timer on the message thread. */
     void collectGarbage();
+
+    /** Message thread. Prepares the instrument for the current device and
+        hands it to the audio thread; nullptr returns to the built-in synth.
+        The previous instrument is destroyed later, on the message thread,
+        once the audio thread can no longer be using it. */
+    void setInstrument (std::unique_ptr<audio::IInstrumentRenderer> instrument);
+    audio::IInstrumentRenderer* instrument() const noexcept { return external_.get(); }
+
+    /** Sample rate and block size the instrument must be prepared for. */
+    std::pair<double, int> renderFormat() const;
 
 private:
     void send (const audio::PlaybackCommand& command, const char* what);
@@ -82,6 +93,16 @@ private:
     std::shared_ptr<const audio::PlaybackEventList> current_;
     std::vector<std::shared_ptr<const audio::PlaybackEventList>> retired_;
     std::uint64_t nextListId_ = 1;
+
+    // Instruments: the audio thread reads active_ once per block. Retired
+    // instruments wait for two more blocks before the message thread deletes them.
+    std::unique_ptr<audio::IInstrumentRenderer> external_;
+    std::vector<std::pair<std::unique_ptr<audio::IInstrumentRenderer>, std::uint64_t>> retiredInstruments_;
+    std::atomic<audio::IInstrumentRenderer*> active_ { &synth_ };
+    audio::IInstrumentRenderer* lastUsed_ = &synth_; // audio thread only
+    std::atomic<std::uint64_t> blocksRendered_ { 0 };
+    std::atomic<double> deviceRate_ { 48000.0 };
+    std::atomic<int> deviceBlock_ { 512 };
 
     juce::SmoothedValue<float> gain_ { 0.8f };
     std::atomic<float> targetGain_ { 0.8f };

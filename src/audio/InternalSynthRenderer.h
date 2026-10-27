@@ -21,7 +21,7 @@ public:
     void silence() noexcept override;
     int reportedLatencyFrames() const noexcept override { return 0; }
 
-    int activeVoiceCount() const noexcept;
+    int activeVoiceCount() const noexcept override;
 
 private:
     juce::Synthesiser synth_;

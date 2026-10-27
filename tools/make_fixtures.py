@@ -7,6 +7,7 @@ works and freely redistributable. Run from the repository root:
     python tools/make_fixtures.py
 """
 from pathlib import Path
+import math
 import struct
 
 OUT = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
@@ -48,6 +49,50 @@ def notes(pitches, length, channel=0, velocity=90):
         # Zero-velocity note-on as note-off, as many keyboards and files do.
         events.append((length, bytes([0x90 | channel, p, 0])))
     return events
+
+
+def chunk(cid: bytes, data: bytes) -> bytes:
+    pad = b"\0" if len(data) % 2 else b""
+    return cid + struct.pack("<I", len(data)) + data + pad
+
+
+def riff_list(kind: bytes, *chunks) -> bytes:
+    body = kind + b"".join(chunks)
+    return b"LIST" + struct.pack("<I", len(body)) + body
+
+
+def tiny_soundfont() -> bytes:
+    """Smallest useful SoundFont 2: one looping sine sample, one instrument,
+    one preset (bank 0, program 0) covering every key."""
+    rate, length = 22050, 2205  # 0.1 s; a whole number of 441 Hz cycles
+    samples = [int(12000 * math.sin(2 * math.pi * 441 * i / rate)) for i in range(length)]
+    smpl = struct.pack(f"<{length}h", *samples) + b"\0\0" * 46  # spec: 46 zero samples after each sample
+
+    def name20(text):
+        return text.encode("ascii")[:20].ljust(20, b"\0")
+
+    phdr = (name20("Sine") + struct.pack("<HHHIII", 0, 0, 0, 0, 0, 0)
+            + name20("EOP") + struct.pack("<HHHIII", 0, 0, 1, 0, 0, 0))
+    pbag = struct.pack("<HH", 0, 0) + struct.pack("<HH", 1, 0)
+    pmod = b"\0" * 10
+    pgen = struct.pack("<HH", 41, 0) + struct.pack("<HH", 0, 0)            # instrument 0, terminal
+    inst = name20("Sine") + struct.pack("<H", 0) + name20("EOI") + struct.pack("<H", 1)
+    ibag = struct.pack("<HH", 0, 0) + struct.pack("<HH", 2, 0)
+    imod = b"\0" * 10
+    igen = (struct.pack("<HH", 54, 1)                                     # sampleModes: loop
+            + struct.pack("<HH", 53, 0)                                   # sampleID 0 (last)
+            + struct.pack("<HH", 0, 0))                                   # terminal
+    shdr = (name20("Sine") + struct.pack("<IIIIIBbHH", 0, length, 0, length, rate, 69, 0, 0, 1)
+            + name20("EOS") + struct.pack("<IIIIIBbHH", 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+    info = riff_list(b"INFO", chunk(b"ifil", struct.pack("<HH", 2, 1)), chunk(b"isng", b"EMU8000\0"),
+                     chunk(b"INAM", b"Tiny sine\0"))
+    sdta = riff_list(b"sdta", chunk(b"smpl", smpl))
+    pdta = riff_list(b"pdta", chunk(b"phdr", phdr), chunk(b"pbag", pbag), chunk(b"pmod", pmod),
+                     chunk(b"pgen", pgen), chunk(b"inst", inst), chunk(b"ibag", ibag), chunk(b"imod", imod),
+                     chunk(b"igen", igen), chunk(b"shdr", shdr))
+    body = b"sfbk" + info + sdta + pdta
+    return b"RIFF" + struct.pack("<I", len(body)) + body
 
 
 def main():
@@ -148,6 +193,9 @@ def main():
     # 11. No backing: format 0, one channel, both hands together.
     solo = track([(0, tempo(500000))] + seq([([48, 64], 1), ([52, 67], 1), ([55, 72], 2)]))
     (OUT / "practice_no_backing.mid").write_bytes(smf(0, [solo]))
+
+    # 12. Tiny SoundFont for the .sf2 renderer tests (original, generated).
+    (OUT / "tiny_sine.sf2").write_bytes(tiny_soundfont())
 
     print(f"Wrote fixtures to {OUT}")
 

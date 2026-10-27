@@ -34,6 +34,10 @@ PlaybackEventList buildPlaybackEvents (const timeline::Song& song, std::uint64_t
                                  std::max<std::uint8_t> (1, note.velocity) });
         list.events.push_back ({ note.endSeconds, static_cast<std::uint8_t> (0x80u | channel), note.pitch, 64 });
     }
+    for (const auto& part : song.parts)
+        if (part.program >= 0 && part.program <= 127 && list.programs[part.channel & 0x0F] < 0)
+            list.programs[part.channel & 0x0F] = static_cast<std::int16_t> (part.program);
+
     for (const auto& sustain : song.sustainEvents)
         list.events.push_back ({ sustain.seconds, static_cast<std::uint8_t> (0xB0u | (sustain.channel & 0x0F)), 64,
                                  sustain.value });

@@ -43,6 +43,18 @@ struct PracticeChoices
     friend bool operator== (const PracticeChoices&, const PracticeChoices&) = default;
 };
 
+/** Which instrument plays the song. The plug-in identifier is JUCE's
+    description identifier; the SoundFont path is UTF-8. */
+struct SoundSettings
+{
+    std::string kind = "builtIn"; ///< builtIn, soundFont or plugin
+    std::string pluginId;
+    std::string pluginName;   ///< shown when the plug-in is missing
+    std::string soundFontPath;
+
+    friend bool operator== (const SoundSettings&, const SoundSettings&) = default;
+};
+
 struct Settings
 {
     MidiInputSettings midiInput;
@@ -50,6 +62,7 @@ struct Settings
     VisualPreferences visual;
     lesson::InputCalibration calibration;
     PracticeChoices practice;
+    SoundSettings sound;
 
     friend bool operator== (const Settings&, const Settings&) = default;
 };

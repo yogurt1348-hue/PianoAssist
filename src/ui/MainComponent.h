@@ -6,6 +6,7 @@
 #include "ui/PianoRollComponent.h"
 #include "ui/PianoRollView.h"
 #include "ui/PracticeView.h"
+#include "ui/SoundView.h"
 #include "ui/TransportView.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -45,6 +46,11 @@ public:
         std::function<void (bool play)> playOtherPartChanged;
         std::function<void (bool play)> playBackingChanged;
         std::function<void (std::size_t part, int assignment)> partAssignmentChanged;
+        std::function<void (int soundId)> soundChosen; ///< SoundView ids
+        std::function<void()> loadSoundFont;
+        std::function<void()> addPluginFile;
+        std::function<void()> scanPlugins;
+        std::function<void()> showInstrumentWindow;
     };
 
     explicit MainComponent (Intents intents);
@@ -55,6 +61,7 @@ public:
     void setPixelsPerSecond (double pixelsPerSecond) { roll_.setPixelsPerSecond (pixelsPerSecond); }
     void setTransport (const TransportView& view);
     void setPractice (const PracticeView& view);
+    void setSound (const SoundView& view);
     void setVolume (float gain) { volume_.setValue (gain, juce::dontSendNotification); }
 
     bool keyPressed (const juce::KeyPress& key) override;
@@ -102,6 +109,10 @@ private:
     juce::Slider volume_ { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::Label volumeLabel_;
     juce::Label timeLabel_;
+    juce::Label soundLabel_;
+    juce::ComboBox soundBox_;
+    juce::TextButton instrumentWindowButton_ { "Instrument..." };
+    SoundView sound_;
     juce::Label transportNote_;
     TransportView transport_;
 
