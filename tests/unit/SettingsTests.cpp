@@ -26,6 +26,9 @@ Settings customSettings()
     s.visual.pixelsPerSecond = 240.0;
     s.visual.showNoteNames = false;
     s.calibration.inputOffsetMs = -12.5;
+    s.practice.mode = lesson::PracticeMode::leftHand;
+    s.practice.accompaniment.playOtherPianoPart = false;
+    s.practice.accompaniment.playBacking = false;
     return s;
 }
 } // namespace
@@ -110,4 +113,17 @@ TEST_CASE ("Missing sections keep defaults and unknown keys are ignored")
     CHECK (loaded.status == LoadStatus::loaded);
     CHECK (loaded.settings.midiInput.lastSeenName == "CDP-S110");
     CHECK (loaded.settings.practiceProfile == lesson::PracticeProfile {});
+}
+
+TEST_CASE ("Practice choices are optional and validated")
+{
+    // Files from phase 3 builds have no "practice" section: defaults, no warning.
+    const auto old = fromJson (R"({"schemaVersion": 1, "visual": {"pixelsPerSecond": 200}})");
+    CHECK (old.status == LoadStatus::loaded);
+    CHECK (old.settings.practice == PracticeChoices {});
+
+    const auto bad = fromJson (R"({"schemaVersion": 1, "practice": {"mode": "feet", "playBacking": false}})");
+    CHECK (bad.status == LoadStatus::recovered);
+    CHECK (bad.settings.practice.mode == lesson::PracticeMode::bothHands);
+    CHECK_FALSE (bad.settings.practice.accompaniment.playBacking);
 }

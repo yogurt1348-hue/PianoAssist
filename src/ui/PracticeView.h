@@ -24,6 +24,8 @@ struct PracticeView
     bool practising = false;
     int mode = 0;
     int tolerance = 1;
+    bool playOtherPart = true;
+    bool playBacking = true;
     bool waiting = false;
     bool accompanimentOnly = false;
     std::vector<std::uint8_t> required; ///< current step, still to play

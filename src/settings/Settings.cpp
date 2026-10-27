@@ -7,6 +7,7 @@
 #include <cmath>
 #include <functional>
 #include <map>
+#include <optional>
 
 namespace pianoassist::settings
 {
@@ -19,6 +20,25 @@ const std::map<int, std::function<void (json&)>>& migrations()
 {
     static const std::map<int, std::function<void (json&)>> steps {};
     return steps;
+}
+
+std::string modeKey (lesson::PracticeMode mode)
+{
+    switch (mode)
+    {
+        case lesson::PracticeMode::bothHands: return "bothHands";
+        case lesson::PracticeMode::rightHand: return "rightHand";
+        case lesson::PracticeMode::leftHand:  return "leftHand";
+    }
+    return "bothHands";
+}
+
+std::optional<lesson::PracticeMode> modeFromKey (const std::string& key)
+{
+    for (const auto mode : { lesson::PracticeMode::bothHands, lesson::PracticeMode::rightHand, lesson::PracticeMode::leftHand })
+        if (key == modeKey (mode))
+            return mode;
+    return std::nullopt;
 }
 
 class Reader
@@ -101,6 +121,10 @@ std::string toJson (const Settings& s)
             { "requireExactPitch", s.practiceProfile.requireExactPitch } } },
         { "visual", { { "pixelsPerSecond", s.visual.pixelsPerSecond }, { "showNoteNames", s.visual.showNoteNames } } },
         { "calibration", { { "inputOffsetMs", s.calibration.inputOffsetMs } } },
+        { "practice",
+          { { "mode", modeKey (s.practice.mode) },
+            { "playOtherPianoPart", s.practice.accompaniment.playOtherPianoPart },
+            { "playBacking", s.practice.accompaniment.playBacking } } },
     };
     return root.dump (2);
 }
@@ -157,6 +181,12 @@ LoadResult fromJson (std::string_view text)
     const auto maxOffset = lesson::InputCalibration::maxAbsOffsetMs;
     reader.read ("calibration", "inputOffsetMs", s.calibration.inputOffsetMs,
                  [maxOffset] (const double& v) { return finiteIn (v, -maxOffset, maxOffset); });
+
+    std::string mode = modeKey (s.practice.mode);
+    reader.read ("practice", "mode", mode, [] (const std::string& key) { return modeFromKey (key).has_value(); });
+    s.practice.mode = modeFromKey (mode).value_or (lesson::PracticeMode::bothHands);
+    reader.read ("practice", "playOtherPianoPart", s.practice.accompaniment.playOtherPianoPart);
+    reader.read ("practice", "playBacking", s.practice.accompaniment.playBacking);
 
     result.status = result.warnings.empty() ? LoadStatus::loaded : LoadStatus::recovered;
     return result;

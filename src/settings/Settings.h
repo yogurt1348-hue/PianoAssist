@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lesson_engine/PracticeMode.h"
 #include "lesson_engine/PracticeProfile.h"
 
 #include <filesystem>
@@ -33,12 +34,22 @@ struct VisualPreferences
     friend bool operator== (const VisualPreferences&, const VisualPreferences&) = default;
 };
 
+/** The learner's last practice choices, restored at start. */
+struct PracticeChoices
+{
+    lesson::PracticeMode mode = lesson::PracticeMode::bothHands;
+    lesson::Accompaniment accompaniment;
+
+    friend bool operator== (const PracticeChoices&, const PracticeChoices&) = default;
+};
+
 struct Settings
 {
     MidiInputSettings midiInput;
     lesson::PracticeProfile practiceProfile;
     VisualPreferences visual;
     lesson::InputCalibration calibration;
+    PracticeChoices practice;
 
     friend bool operator== (const Settings&, const Settings&) = default;
 };

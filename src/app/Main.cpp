@@ -213,13 +213,28 @@ public:
             [this] (double seconds) { lesson_->seek (seconds); },
             [this] (float gain) { audio_->setGain (gain); },
             [this] (bool practising) { lesson_->setPractising (practising); },
-            [this] (int mode) { lesson_->setMode (toPracticeMode (mode)); },
+            [this] (int mode) {
+                settings_.practice.mode = toPracticeMode (mode);
+                lesson_->setMode (settings_.practice.mode);
+                saveSettings();
+            },
             [this] (int tolerance) {
                 settings_.practiceProfile = lesson::profileFor (static_cast<lesson::Tolerance> (std::clamp (tolerance, 0, 2)));
                 lesson_->setProfile (settings_.practiceProfile);
                 saveSettings();
             },
             [this] (std::uint8_t pitch, bool down) { lesson_->previewKey (pitch, down); },
+            [this] (bool play) {
+                settings_.practice.accompaniment.playOtherPianoPart = play;
+                lesson_->setAccompaniment (settings_.practice.accompaniment);
+                saveSettings();
+            },
+            [this] (bool play) {
+                settings_.practice.accompaniment.playBacking = play;
+                lesson_->setAccompaniment (settings_.practice.accompaniment);
+                saveSettings();
+            },
+            [this] (std::size_t part, int assignment) { reassignPart (part, assignment); },
         });
         content_ = content;
         content->setPixelsPerSecond (settings_.visual.pixelsPerSecond);
@@ -237,6 +252,8 @@ public:
         settings_.practiceProfile = lesson::profileFor (lesson::toleranceOf (settings_.practiceProfile));
         lesson_ = std::make_unique<LessonController> (*log_, *audio_, midi_->lessonQueue(), settings_.practiceProfile,
                                                       settings_.calibration.inputOffsetMs);
+        lesson_->setMode (settings_.practice.mode);
+        lesson_->setAccompaniment (settings_.practice.accompaniment);
         lesson_->start();
         content->setVolume (0.8f);
         startTimerHz (30);
@@ -309,10 +326,30 @@ private:
             return;
         }
         song_ = std::move (song).value();
+        songTitle_ = file.getFileNameWithoutExtension().toStdString();
         lesson_->loadSong (song_);
-        content_->setSong (std::make_shared<const ui::PianoRollView> (
-            makePianoRollView (*song_, file.getFileNameWithoutExtension().toStdString())));
+        content_->setSong (std::make_shared<const ui::PianoRollView> (makePianoRollView (*song_, songTitle_)));
         log_->write (LogLevel::info, "song", "Song shown in piano roll");
+    }
+
+    void reassignPart (std::size_t part, int assignment)
+    {
+        if (song_ == nullptr || assignment < 0 || assignment > 3)
+            return;
+        const auto to = static_cast<timeline::Part::Assignment> (assignment);
+        auto mapped = timeline::reassignPart (*song_, part, to);
+        if (! mapped)
+        {
+            log_->write (LogLevel::error, "song", "Part change failed", { { "error", mapped.error() } });
+            return;
+        }
+        log_->write (LogLevel::info, "song", "User changed a part",
+                     { { "part", std::to_string (part + 1) },
+                       { "from", timeline::toString (song_->parts[part].assignment) },
+                       { "to", timeline::toString (to) } });
+        song_ = std::make_shared<const timeline::Song> (std::move (mapped).value());
+        lesson_->loadSong (song_, true);
+        content_->setSong (std::make_shared<const ui::PianoRollView> (makePianoRollView (*song_, songTitle_)));
     }
 
     void timerCallback() override
@@ -346,6 +383,8 @@ private:
         pv.mode = static_cast<int> (practice.mode);
         pv.waiting = practice.waiting;
         pv.tolerance = static_cast<int> (practice.tolerance);
+        pv.playOtherPart = practice.accompaniment.playOtherPianoPart;
+        pv.playBacking = practice.accompaniment.playBacking;
         pv.accompanimentOnly = practice.accompanimentOnly;
         pv.current = { practice.current.right, practice.current.left };
         for (const auto& step : practice.upcoming)
@@ -385,6 +424,7 @@ private:
     std::unique_ptr<juce::FileChooser> chooser_;
     juce::File lastFolder_ = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
     std::shared_ptr<const timeline::Song> song_;
+    std::string songTitle_;
     std::unique_ptr<AudioService> audio_;
     std::unique_ptr<LessonController> lesson_;
     std::string audioError_;

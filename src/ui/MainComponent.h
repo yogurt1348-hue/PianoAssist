@@ -40,6 +40,9 @@ public:
         std::function<void (int mode)> modeChanged;
         std::function<void (int tolerance)> toleranceChanged;
         std::function<void (std::uint8_t pitch, bool down)> keyClicked;
+        std::function<void (bool play)> playOtherPartChanged;
+        std::function<void (bool play)> playBackingChanged;
+        std::function<void (std::size_t part, int assignment)> partAssignmentChanged;
     };
 
     explicit MainComponent (Intents intents);
@@ -89,6 +92,7 @@ private:
     juce::Label partsHeader_;
     juce::OwnedArray<juce::ToggleButton> partToggles_;
     juce::OwnedArray<juce::Label> partDetails_;
+    juce::OwnedArray<juce::ComboBox> partRoles_;
 
     juce::TextButton playButton_ { "Play" };
     juce::TextButton stopButton_ { "Stop" };
@@ -102,6 +106,8 @@ private:
     juce::ToggleButton practiceToggle_ { "Practice: wait for my notes" };
     juce::ComboBox modeBox_;
     juce::ComboBox toleranceBox_;
+    juce::ToggleButton otherPartToggle_ { "Play other hand" };
+    juce::ToggleButton backingToggle_ { "Play backing" };
     juce::Label gateLabel_;
     NextNotesBoard board_;
 

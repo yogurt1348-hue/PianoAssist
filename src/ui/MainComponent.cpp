@@ -131,10 +131,15 @@ MainComponent::MainComponent (Intents intents)
     toleranceBox_.setSelectedId (2, juce::dontSendNotification);
     toleranceBox_.setTooltip ("How early or late a note may be played and still count. Strict: 120 ms early / 180 ms late. "
                               "Normal: 250 / 300 ms. Easy: 400 / 600 ms. Within the window the song keeps going.");
+    otherPartToggle_.setTooltip ("In one-hand practice, the app plays the other hand for you");
+    otherPartToggle_.onClick = [this] { if (intents_.playOtherPartChanged) intents_.playOtherPartChanged (otherPartToggle_.getToggleState()); };
+    backingToggle_.setTooltip ("Play the band/backing parts (drums, bass, strings...)");
+    backingToggle_.onClick = [this] { if (intents_.playBackingChanged) intents_.playBackingChanged (backingToggle_.getToggleState()); };
     toleranceBox_.onChange = [this] { if (intents_.toleranceChanged) intents_.toleranceChanged (toleranceBox_.getSelectedId() - 1); };
     gateLabel_.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
     gateLabel_.setJustificationType (juce::Justification::centredRight);
-    for (auto* c : std::initializer_list<juce::Component*> { &practiceToggle_, &modeBox_, &toleranceBox_, &gateLabel_, &board_ })
+    for (auto* c : std::initializer_list<juce::Component*> { &practiceToggle_, &modeBox_, &toleranceBox_, &otherPartToggle_,
+                                                              &backingToggle_, &gateLabel_, &board_ })
         addAndMakeVisible (c);
     setWantsKeyboardFocus (true);
 
@@ -185,6 +190,9 @@ void MainComponent::setPractice (const PracticeView& view)
     keyboard_.setPracticePitches (view.practising ? view.required : std::vector<std::uint8_t> {}, view.wrong);
 
     toleranceBox_.setSelectedId (view.tolerance + 1, juce::dontSendNotification);
+    otherPartToggle_.setToggleState (view.playOtherPart, juce::dontSendNotification);
+    otherPartToggle_.setEnabled (view.mode != 0);
+    backingToggle_.setToggleState (view.playBacking, juce::dontSendNotification);
     board_.setView (view);
     gateLabel_.setText (view.practising && view.gateCount > 0
                             ? "Step " + juce::String (static_cast<int> (view.gateNumber == 0 ? view.gateCount : view.gateNumber))
@@ -266,6 +274,9 @@ void MainComponent::setSong (std::shared_ptr<const PianoRollView> song)
     if (song_)
         for (const auto& notice : song_->notices)
             notices << (notices.isEmpty() ? "" : "  ") << toJuce (notice);
+    if (song_ && song_->needsPartCheck)
+        notices = "Hands were guessed from pitch: check the parts on the left (marked ?) before practising."
+                  + (notices.isEmpty() ? juce::String() : "  " + notices);
     songNotices_.setText (notices, juce::dontSendNotification);
     songNotices_.setColour (juce::Label::textColourId, juce::Colours::orange);
     emptyHint_.setVisible (song_ == nullptr);
@@ -283,6 +294,7 @@ void MainComponent::rebuildPartList()
 {
     partToggles_.clear();
     partDetails_.clear();
+    partRoles_.clear();
     partsHeader_.setVisible (song_ != nullptr);
     if (! song_)
         return;
@@ -290,7 +302,7 @@ void MainComponent::rebuildPartList()
     for (std::size_t i = 0; i < song_->parts.size(); ++i)
     {
         const auto& part = song_->parts[i];
-        auto* toggle = partToggles_.add (new juce::ToggleButton (toJuce (part.roleText + ": " + part.label)));
+        auto* toggle = partToggles_.add (new juce::ToggleButton (toJuce ((part.guessedFromPitch ? "? " : "") + part.label)));
         toggle->setToggleState (true, juce::dontSendNotification);
         toggle->setColour (juce::ToggleButton::textColourId, roleColour (part.role).brighter (0.3f));
         toggle->setColour (juce::ToggleButton::tickColourId, roleColour (part.role));
@@ -307,6 +319,24 @@ void MainComponent::rebuildPartList()
         detail->setFont (juce::FontOptions (12.0f));
         detail->setColour (juce::Label::textColourId, juce::Colours::grey);
         addAndMakeVisible (detail);
+
+        auto* role = partRoles_.add (new juce::ComboBox());
+        role->addItem ("Right hand", 1);
+        role->addItem ("Left hand", 2);
+        role->addItem ("Both hands (split at C4)", 3);
+        role->addItem ("Backing (app plays it)", 4);
+        role->setSelectedId (part.assignment + 1, juce::dontSendNotification);
+        role->setTooltip ("Who plays this part. Change it if the guess is wrong.");
+        role->setColour (juce::ComboBox::outlineColourId, roleColour (part.role));
+        role->onChange = [this, i, role] {
+            // Deferred: the change rebuilds this list, which deletes this box.
+            const int assignment = role->getSelectedId() - 1;
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), i, assignment] {
+                if (safe != nullptr && safe->intents_.partAssignmentChanged)
+                    safe->intents_.partAssignmentChanged (i, assignment);
+            });
+        };
+        addAndMakeVisible (role);
     }
 }
 
@@ -379,6 +409,9 @@ void MainComponent::resized()
     modeBox_.setBounds (practiceBar.removeFromLeft (130));
     practiceBar.removeFromLeft (12);
     toleranceBox_.setBounds (practiceBar.removeFromLeft (140));
+    practiceBar.removeFromLeft (12);
+    otherPartToggle_.setBounds (practiceBar.removeFromLeft (140));
+    backingToggle_.setBounds (practiceBar.removeFromLeft (120));
     gateLabel_.setBounds (practiceBar.removeFromRight (200));
 
     area.removeFromTop (6);
@@ -395,6 +428,7 @@ void MainComponent::resized()
         for (int i = 0; i < partToggles_.size(); ++i)
         {
             partToggles_[i]->setBounds (list.removeFromTop (24));
+            partRoles_[i]->setBounds (list.removeFromTop (24).withTrimmedLeft (26));
             partDetails_[i]->setBounds (list.removeFromTop (18).withTrimmedLeft (26));
             list.removeFromTop (4);
         }

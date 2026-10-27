@@ -28,6 +28,7 @@ struct GateHands
 struct PracticeSnapshot
 {
     lesson::Tolerance tolerance = lesson::Tolerance::normal;
+    lesson::Accompaniment accompaniment;
     GateHands current;                      ///< the gate to play now
     std::vector<GateHands> upcoming;        ///< the next few gates after it
     bool practising = false;
@@ -56,7 +57,9 @@ public:
     void start();
 
     // Thread-safe intents from the UI thread.
-    void loadSong (std::shared_ptr<const timeline::Song> song);
+    /** A new song starts at 0; a remapped song (same file, parts changed)
+        keeps the position. Either way playback stops. */
+    void loadSong (std::shared_ptr<const timeline::Song> song, bool keepPosition = false);
     void playPause();
     void stop();
     void seek (double seconds);
@@ -64,12 +67,13 @@ public:
     void setPractising (bool practising);
     void setMode (lesson::PracticeMode mode);
     void setProfile (lesson::PracticeProfile profile);
+    void setAccompaniment (lesson::Accompaniment accompaniment);
     void previewKey (std::uint8_t pitch, bool down); ///< a click on the on-screen keyboard
 
     PracticeSnapshot snapshot() const;
 
 private:
-    struct LoadSong { std::shared_ptr<const timeline::Song> song; };
+    struct LoadSong { std::shared_ptr<const timeline::Song> song; bool keepPosition; };
     struct PlayPause {};
     struct Stop {};
     struct Seek { double seconds; };
@@ -77,8 +81,9 @@ private:
     struct SetPractising { bool on; };
     struct SetMode { lesson::PracticeMode mode; };
     struct SetProfile { lesson::PracticeProfile profile; };
+    struct SetAccompaniment { lesson::Accompaniment accompaniment; };
     struct PreviewKey { std::uint8_t pitch; bool down; };
-    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, PreviewKey>;
+    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, SetAccompaniment, PreviewKey>;
 
     void post (Intent intent);
     void hiResTimerCallback() override;
@@ -103,6 +108,7 @@ private:
     std::shared_ptr<const timeline::Song> song_;
     bool practising_ = false;
     lesson::PracticeMode mode_ = lesson::PracticeMode::bothHands;
+    lesson::Accompaniment accompaniment_;
     std::optional<lesson::PracticeSession> session_;
     std::vector<GateHands> hands_; ///< parallel to the session's gates
     std::uint64_t seenArrivals_ = 0;

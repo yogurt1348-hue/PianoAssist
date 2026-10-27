@@ -33,6 +33,8 @@ struct Part
     double meanPitch = 0.0;
     Assignment assignment = Assignment::backing;
     std::string reason; ///< why the assignment was inferred; shown in diagnostics
+    bool guessedFromPitch = false; ///< low confidence: the user should check it before practising
+    bool setByUser = false;
 };
 
 const char* toString (Part::Assignment assignment) noexcept;
@@ -81,6 +83,13 @@ Result<Song> buildSong (const smf::SmfFile& file);
 /** Start time of every bar from the time signatures and tempo map, up to the
     end of the song. Bounded so a corrupt file cannot produce millions. */
 std::vector<double> barStartSeconds (const Song& song, std::size_t maxBars = 20'000);
+
+/** The song with one part reassigned by the user; note roles follow. Fails
+    only for an index out of range. */
+Result<Song> reassignPart (const Song& song, std::size_t partIndex, Part::Assignment assignment);
+
+/** True when some hand assignment was only guessed from pitch. */
+bool needsPartCheck (const Song& song) noexcept;
 
 /** Infers each part's assignment. Exposed for tests. */
 std::vector<Part> inferParts (const smf::SmfFile& file);

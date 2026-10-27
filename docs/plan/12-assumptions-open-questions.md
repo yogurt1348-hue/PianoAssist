@@ -68,7 +68,12 @@ Decisions taken while implementing, per `11-claude-workflow.md`. Each one can be
 | 2026-10-27 | 3.1 | A "Play next" board shows the current step in large chips (note name and solfège, blue right hand, orange left hand) and the next three steps. The keyboard labels every white key (C D E... and до ре ми, octave on C) and sounds a key when clicked, on MIDI channel 16 apart from the song; clicks do not count as practice presses. | Owner feedback. |
 | 2026-10-27 | — | VST3 instruments (owner asked about FLEX-like sounds) are not in the MVP plan: only the `IInstrumentRenderer` seam exists, and phase 5 lists the requirements. Proposed as phase 6 after the MVP. FLEX itself is an FL Studio-native plug-in and is likely unavailable outside FL Studio. | Brief keeps VST3 out of the MVP. |
 
+| 2026-10-27 | 4 | "Play other hand" (default on) and "Play backing" (default on) are independent switches. The other hand is optional only in one-hand practice; required notes are never played for the learner; parts of unknown role follow the backing switch and never become required. Mode and both switches are saved in settings (`practice` section; older files load defaults without a warning). | Phase 4 brief, mode table. |
+| 2026-10-27 | 4 | Manual mapping: every part has a role box (Right / Left / Both split at C4 / Backing) in the part list, always visible. Parts whose hand was only guessed from pitch (single piano part split at C4, two unnamed piano parts by average pitch) are marked "?" and a notice asks to check them. Mapping is per opened song and not saved yet. | Brief: expose mapping when confidence is low; never silently make percussion a hand. |
+| 2026-10-27 | 4 | Changing mode, practice, accompaniment or a part's role stops playback at the current position and rebuilds gates from there. Tolerance changes do not stop playback. | "Switching mode resets transport/gate state predictably." |
+| 2026-10-27 | 4 | Spans without required notes play through; the board shows "Accompaniment only" when the next note of yours is more than 1.5 s away. No auto-run limit. | Brief: no arbitrary stops. |
+
 ## Open questions added during implementation
 
 7. Which licence should the repository carry? With JUCE 8 the options are AGPLv3 for the whole app, or a JUCE commercial/indie licence.
-8. Should VST3 instrument hosting become phase 6 right after the MVP? The owner asked for FL Studio-style plug-in sounds.
+8. ~~Should VST3 hosting become phase 6?~~ Owner (2026-10-27): VST3 waits until after the MVP; follow the plan.

@@ -87,7 +87,11 @@ void LessonController::post (Intent intent)
     intents_.push_back (std::move (intent));
 }
 
-void LessonController::loadSong (std::shared_ptr<const timeline::Song> song) { post (LoadSong { std::move (song) }); }
+void LessonController::loadSong (std::shared_ptr<const timeline::Song> song, bool keepPosition)
+{
+    post (LoadSong { std::move (song), keepPosition });
+}
+void LessonController::setAccompaniment (lesson::Accompaniment a) { post (SetAccompaniment { a }); }
 void LessonController::playPause() { post (PlayPause {}); }
 void LessonController::stop() { post (Stop {}); }
 void LessonController::seek (double s) { post (Seek { s }); }
@@ -116,9 +120,11 @@ void LessonController::rebuild (double position, const char* why)
         return;
     const auto mode = mode_;
     const bool practising = practising_;
-    // The learner plays the practised hands on the piano; the app plays the rest.
-    audio_.loadSong (*song_, [mode, practising] (timeline::NoteRole role) {
-        return ! practising || ! lesson::isRequired (role, mode);
+    const auto accompaniment = accompaniment_;
+    // The learner plays the practised hands on the piano; the app plays the
+    // rest, as far as the accompaniment choices allow.
+    audio_.loadSong (*song_, [mode, practising, accompaniment] (timeline::NoteRole role) {
+        return lesson::isPlayedByApp (role, practising, mode, accompaniment);
     });
     if (position > 0.0)
         audio_.seek (position);
@@ -162,7 +168,9 @@ void LessonController::handle (const Intent& intent)
             if constexpr (std::is_same_v<T, LoadSong>)
             {
                 song_ = i.song;
-                rebuild (0.0, "song loaded");
+                if (i.keepPosition)
+                    audio_.stop();
+                rebuild (i.keepPosition ? audio.positionSeconds : 0.0, i.keepPosition ? "parts changed" : "song loaded");
             }
             else if constexpr (std::is_same_v<T, PlayPause>)
             {
@@ -233,6 +241,17 @@ void LessonController::handle (const Intent& intent)
                     resetGates (position);
                 }
             }
+            else if constexpr (std::is_same_v<T, SetAccompaniment>)
+            {
+                if (accompaniment_ == i.accompaniment)
+                    return;
+                accompaniment_ = i.accompaniment;
+                log_.write (LogLevel::info, "lesson", "Accompaniment changed",
+                            { { "playOtherPianoPart", accompaniment_.playOtherPianoPart ? "yes" : "no" },
+                              { "playBacking", accompaniment_.playBacking ? "yes" : "no" } });
+                audio_.stop();
+                rebuild (audio.positionSeconds, "accompaniment changed");
+            }
             else if constexpr (std::is_same_v<T, PreviewKey>)
             {
                 log_.write (LogLevel::debug, "ui", i.down ? "On-screen key down" : "On-screen key up",
@@ -291,6 +310,7 @@ void LessonController::publish (const AudioService::Snapshot& audio)
     PracticeSnapshot snap;
     snap.practising = practising_;
     snap.tolerance = lesson::toleranceOf (profile_);
+    snap.accompaniment = accompaniment_;
     snap.mode = mode_;
     snap.waiting = audio.state == PlaybackState::waitingForGate;
     snap.lastVerdict = lastVerdict_;

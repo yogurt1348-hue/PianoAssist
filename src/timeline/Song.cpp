@@ -59,6 +59,17 @@ bool isPianoProgram (int program)
 {
     return program < 0 || program <= 7; // GM 1-8 are pianos; no program change means piano
 }
+NoteRole roleFor (const Part& part, std::uint8_t pitch) noexcept
+{
+    switch (part.assignment)
+    {
+        case Part::Assignment::rightHand:      return NoteRole::rightHand;
+        case Part::Assignment::leftHand:       return NoteRole::leftHand;
+        case Part::Assignment::backing:        return NoteRole::backing;
+        case Part::Assignment::splitAtMiddleC: return pitch < handSplitPitch ? NoteRole::leftHand : NoteRole::rightHand;
+    }
+    return NoteRole::backing;
+}
 } // namespace
 
 const char* toString (Part::Assignment assignment) noexcept
@@ -155,6 +166,7 @@ std::vector<Part> inferParts (const smf::SmfFile& file)
         auto& part = *pianoCandidates.front();
         part.assignment = Part::Assignment::splitAtMiddleC;
         part.reason = "only piano part; split at C4";
+        part.guessedFromPitch = true;
     }
     else
     {
@@ -180,6 +192,7 @@ std::vector<Part> inferParts (const smf::SmfFile& file)
                           : (hasNamedLeft || hasNamedRight) ? "other hand is named"
                           : i < 2 ? "higher/lower average pitch"
                                   : "extra piano part";
+            part.guessedFromPitch = ! hasNamedLeft && ! hasNamedRight && i < 2;
         }
     }
 
@@ -254,15 +267,7 @@ Result<Song> buildSong (const smf::SmfFile& file)
         const auto part = std::find_if (song.parts.begin(), song.parts.end(), [&] (const Part& p) {
             return p.track == source.track && p.channel == source.channel;
         });
-        switch (part->assignment)
-        {
-            case Part::Assignment::rightHand:      note.role = NoteRole::rightHand; break;
-            case Part::Assignment::leftHand:       note.role = NoteRole::leftHand; break;
-            case Part::Assignment::backing:        note.role = NoteRole::backing; break;
-            case Part::Assignment::splitAtMiddleC:
-                note.role = note.pitch < handSplitPitch ? NoteRole::leftHand : NoteRole::rightHand;
-                break;
-        }
+        note.role = roleFor (*part, note.pitch);
         notes.push_back (note);
     }
 
@@ -272,6 +277,35 @@ Result<Song> buildSong (const smf::SmfFile& file)
     song.timeline = std::move (timeline).value();
     song.durationSeconds = std::max (song.timeline.durationSeconds(), song.tempoMap.tickToSeconds (file.endTick));
     return R::ok (std::move (song));
+}
+
+Result<Song> reassignPart (const Song& song, std::size_t partIndex, Part::Assignment assignment)
+{
+    using R = Result<Song>;
+    if (partIndex >= song.parts.size())
+        return R::fail ("No part " + std::to_string (partIndex + 1) + " in this song.");
+
+    Song result = song;
+    auto& part = result.parts[partIndex];
+    part.assignment = assignment;
+    part.reason = "set by you";
+    part.guessedFromPitch = false;
+    part.setByUser = true;
+
+    std::vector<Note> notes (song.timeline.notes().begin(), song.timeline.notes().end());
+    for (auto& note : notes)
+        if (note.trackId == part.track && note.channel == part.channel)
+            note.role = roleFor (part, note.pitch);
+    auto timeline = Timeline::create (std::move (notes));
+    if (! timeline)
+        return R::fail (timeline.error());
+    result.timeline = std::move (timeline).value();
+    return R::ok (std::move (result));
+}
+
+bool needsPartCheck (const Song& song) noexcept
+{
+    return std::any_of (song.parts.begin(), song.parts.end(), [] (const Part& p) { return p.guessedFromPitch; });
 }
 
 } // namespace pianoassist::timeline

@@ -34,6 +34,8 @@ struct PianoRollView
         std::string detail;  ///< e.g. "8 notes · C4-C5 · track name"
         RollRole role = RollRole::unknown;
         std::string roleText;
+        int assignment = 3;            ///< 0 right, 1 left, 2 both split at C4, 3 backing
+        bool guessedFromPitch = false; ///< show a "please check" mark
     };
 
     std::string title;              ///< file name
@@ -43,6 +45,7 @@ struct PianoRollView
     std::vector<Part> parts;
     std::vector<double> barStarts;
     double durationSeconds = 0.0;
+    bool needsPartCheck = false;    ///< some hand was only guessed from pitch
     std::uint8_t lowestPitch = 60;
     std::uint8_t highestPitch = 72;
 };

@@ -111,6 +111,44 @@ def main():
     ])
     (OUT / "format0_parser_edge_cases.mid").write_bytes(smf(0, [edge]))
 
+    # Phase 4 practice fixtures, 120 BPM, one quarter = 0.5 s.
+    def seq(steps, channel=0):
+        """steps: list of (pitches, quarters); consecutive chords."""
+        events = []
+        for pitches, quarters in steps:
+            for i, p in enumerate(pitches):
+                events.append((0, bytes([0x90 | channel, p, 90])))
+            for i, p in enumerate(pitches):
+                events.append((quarters * PPQ if i == 0 else 0, bytes([0x80 | channel, p, 64])))
+        return events
+
+    conductor120 = track([(0, b"\xff\x58\x04\x04\x02\x18\x08"), (0, tempo(500000))])
+
+    # 8. Split hands: two unnamed piano tracks, told apart only by pitch.
+    high = track(seq([([72], 1), ([74], 1), ([76], 1), ([77], 1)]))
+    low = track(seq([([48, 55], 2), ([43, 50], 2)], channel=1))
+    (OUT / "practice_split_hands.mid").write_bytes(smf(1, [conductor120, high, low]))
+
+    # 9. Crossed hands: named tracks; on beat 3 the right hand plays below
+    #    the left (D3 under D4), so a pitch split would be wrong.
+    rh = track([(0, name("RH"))] + seq([([67], 1), ([65], 1), ([50], 1), ([64], 1)]))
+    lh = track([(0, name("LH"))] + seq([([48], 1), ([53], 1), ([62], 1), ([48], 1)], channel=1))
+    (OUT / "practice_crossed_hands.mid").write_bytes(smf(1, [conductor120, rh, lh]))
+
+    # 10. Backing-only intro: two bars of bass alone, then one piano part
+    #     with both hands for one bar while the bass continues.
+    bass_intro = track([(0, name("Bass")), (0, bytes([0xC1, 33]))]
+                       + seq([([36], 2), ([43], 2), ([36], 2), ([43], 2), ([36], 4)], channel=1))
+    piano_late = track([(8 * PPQ, bytes([0x90, 48, 80])), (0, bytes([0x90, 64, 80])),
+                        (2 * PPQ, bytes([0x80, 48, 64])), (0, bytes([0x80, 64, 64])),
+                        (0, bytes([0x90, 55, 80])), (0, bytes([0x90, 67, 80])),
+                        (2 * PPQ, bytes([0x80, 55, 64])), (0, bytes([0x80, 67, 64]))])
+    (OUT / "practice_backing_intro.mid").write_bytes(smf(1, [conductor120, bass_intro, piano_late]))
+
+    # 11. No backing: format 0, one channel, both hands together.
+    solo = track([(0, tempo(500000))] + seq([([48, 64], 1), ([52, 67], 1), ([55, 72], 2)]))
+    (OUT / "practice_no_backing.mid").write_bytes(smf(0, [solo]))
+
     print(f"Wrote fixtures to {OUT}")
 
 
