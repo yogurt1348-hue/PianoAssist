@@ -1,4 +1,5 @@
 #include "app/MidiInputService.h"
+#include "app/CrashReport.h"
 
 #include "core/NoteName.h"
 #include "midi_io/MidiNormalizer.h"
@@ -199,6 +200,7 @@ void MidiInputService::closeDevice (const char* reason)
 
 void MidiInputService::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
 {
+    crash::nameThisThread ("midi");
     callbacks_.fetch_add (1, std::memory_order_relaxed);
     receive (message.getRawData(), message.getRawDataSize());
 }

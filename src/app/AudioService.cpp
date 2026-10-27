@@ -1,4 +1,5 @@
 #include "app/AudioService.h"
+#include "app/CrashReport.h"
 
 #include <algorithm>
 #include <cmath>
@@ -331,6 +332,7 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
                                                      int numSamples, const juce::AudioIODeviceCallbackContext&)
 {
     // Audio thread: no allocation, locks, logging or file access.
+    crash::nameThisThread ("audio");
     const auto blockStart = nowMicros();
     const auto* routing = activeRouting_.load (std::memory_order_acquire);
     if (routing != lastRouting_)

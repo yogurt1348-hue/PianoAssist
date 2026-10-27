@@ -18,6 +18,7 @@ target_sources(PianoAssistApp PRIVATE
     PluginScanner.cpp
     UpdateChecker.cpp
     AudioService.cpp
+    CrashReport.cpp
     ${PROJECT_SOURCE_DIR}/src/audio/InternalSynthRenderer.cpp
     ${PROJECT_SOURCE_DIR}/src/audio/PluginInstrumentRenderer.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/MainComponent.cpp
@@ -54,3 +55,13 @@ target_link_libraries(PianoAssistApp
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags)
+
+if(MSVC)
+    # Crash reports: MiniDumpWriteDump. A Release build also writes a PDB
+    # (published as the symbols ZIP) so a crash dump or a module+offset frame
+    # from a user's machine can be turned into a source line; the code itself
+    # stays optimised the same way.
+    target_link_libraries(PianoAssistApp PRIVATE Dbghelp)
+    target_compile_options(PianoAssistApp PRIVATE $<$<CONFIG:Release>:/Zi>)
+    target_link_options(PianoAssistApp PRIVATE $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
+endif()

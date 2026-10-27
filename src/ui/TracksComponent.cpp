@@ -566,7 +566,8 @@ public:
 
     void choose (int row)
     {
-        if (row < 0 || static_cast<std::size_t> (row) >= shown_.size() || owner_.selected_ < 0 || ! owner_.intents_.presetChosen)
+        if (row < 0 || static_cast<std::size_t> (row) >= shown_.size() || shown_[static_cast<std::size_t> (row)] >= owner_.presets_.size()
+            || owner_.selected_ < 0 || ! owner_.intents_.presetChosen)
             return;
         const auto& preset = owner_.presets_[shown_[static_cast<std::size_t> (row)]];
         const auto part = static_cast<std::size_t> (owner_.selected_);
@@ -587,6 +588,12 @@ public:
         editor_.setVisible (any && owner_.rows_[static_cast<std::size_t> (p)].hasEditor);
         if (! any)
         {
+            // No track: no preset section, and no list rows that point into
+            // another track's presets.
+            for (auto* c : std::initializer_list<juce::Component*> { &presetCaption_, &presetNow_, &presetNote_, &search_, &list_, &midi_ })
+                c->setVisible (false);
+            shown_.clear();
+            list_.updateContent();
             title_.setText (owner_.rows_.empty() ? TRANS ("No song open") : TRANS ("Click a channel to see its details"),
                             juce::dontSendNotification);
             info_.setText ({}, juce::dontSendNotification);
@@ -762,7 +769,8 @@ private:
         int getNumRows() override { return static_cast<int> (owner_.shown_.size()); }
         void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected) override
         {
-            if (row < 0 || static_cast<std::size_t> (row) >= owner_.shown_.size())
+            if (row < 0 || static_cast<std::size_t> (row) >= owner_.shown_.size()
+                || owner_.shown_[static_cast<std::size_t> (row)] >= owner_.owner_.presets_.size())
                 return;
             const auto& p = owner_.owner_.presets_[owner_.shown_[static_cast<std::size_t> (row)]];
             if (selected)

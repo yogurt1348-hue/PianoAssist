@@ -1,5 +1,6 @@
 #include "app/AppPaths.h"
 #include "app/AudioService.h"
+#include "app/CrashReport.h"
 #include "app/InstrumentService.h"
 #include "app/LessonController.h"
 #include "app/MidiInputService.h"
@@ -66,18 +67,21 @@ std::string versionText()
 // Used only by the crash/terminate handlers, which cannot capture state.
 diagnostics::RotatingLog* crashLog = nullptr;
 
-void logCrash (const char* what)
+void logCrash (const char* what, void* platformInfo = nullptr)
 {
     if (crashLog == nullptr)
         return;
     crashLog->write (LogLevel::error, "crash", what,
-                     { { "stack", juce::SystemStats::getStackBacktrace().toStdString() } });
+                     { { "report", crash::describe (platformInfo) },
+                       { "stack", juce::SystemStats::getStackBacktrace().toStdString() } });
 }
 
 void installCrashLogging (diagnostics::RotatingLog& log)
 {
     crashLog = &log;
-    juce::SystemStats::setApplicationCrashHandler ([] (void*) { logCrash ("Application crashed"); });
+    crash::prepare (logDirectory());
+    crash::nameThisThread ("message");
+    juce::SystemStats::setApplicationCrashHandler ([] (void* info) { logCrash ("Application crashed", info); });
     std::set_terminate ([] {
         std::string what = "std::terminate called";
         if (const auto current = std::current_exception())
