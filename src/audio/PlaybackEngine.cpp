@@ -114,6 +114,8 @@ void PlaybackEngine::restorePedal() noexcept
             sustainOwned_.set (channel);
             queueEvent ({ 0, e.status, 64, e.data2 });
         }
+        if (known.all())
+            break;
     }
 }
 

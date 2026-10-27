@@ -275,6 +275,8 @@ public:
         updates_.reset();
         settingsWindow_.reset();
         helpWindow_.reset();
+        libraryWindow_.reset();
+        library_ui_ = nullptr;
         lesson_.reset();
         if (instruments_ != nullptr)
             instruments_->saveState();
