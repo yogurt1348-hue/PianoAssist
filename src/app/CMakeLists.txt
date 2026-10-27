@@ -26,6 +26,7 @@ target_sources(PianoAssistApp PRIVATE
     ${PROJECT_SOURCE_DIR}/src/ui/NextNotesBoard.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/SettingsComponent.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/LibraryComponent.cpp
+    ${PROJECT_SOURCE_DIR}/src/ui/TracksComponent.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/Translations.cpp)
 
 target_compile_definitions(PianoAssistApp PRIVATE

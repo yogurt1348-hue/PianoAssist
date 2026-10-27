@@ -44,6 +44,7 @@ ui::RollRole partRollRole (timeline::Part::Assignment assignment)
         case timeline::Part::Assignment::leftHand:       return ui::RollRole::leftHand;
         case timeline::Part::Assignment::backing:        return ui::RollRole::backing;
         case timeline::Part::Assignment::splitAtMiddleC: return ui::RollRole::unknown;
+        case timeline::Part::Assignment::excluded:       return ui::RollRole::unknown;
     }
     return ui::RollRole::unknown;
 }
@@ -64,6 +65,7 @@ std::string roleText (timeline::Part::Assignment assignment)
         case timeline::Part::Assignment::leftHand:       return "Left hand";
         case timeline::Part::Assignment::splitAtMiddleC: return "Both hands";
         case timeline::Part::Assignment::backing:        return "Backing";
+        case timeline::Part::Assignment::excluded:       return "Excluded";
     }
     return "Backing";
 }
@@ -177,7 +179,10 @@ ui::PianoRollView makePianoRollView (const timeline::Song& song, const std::stri
                                 static_cast<int> (part.assignment),
                                 part.guessedFromPitch,
                                 std::string (timeline::gmProgramName (part.program, part.channel == 9)),
-                                part.noteCount });
+                                part.noteCount,
+                                part.trackName,
+                                part.track + 1,
+                                part.channel + 1 });
     view.needsPartCheck = timeline::needsPartCheck (song);
     return view;
 }

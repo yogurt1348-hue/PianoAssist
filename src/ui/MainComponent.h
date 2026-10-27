@@ -7,6 +7,7 @@
 #include "ui/PianoRollView.h"
 #include "ui/PracticeView.h"
 #include "ui/SoundView.h"
+#include "ui/TracksComponent.h"
 #include "ui/TransportView.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -36,7 +37,8 @@ enum class SettingsPage
 class MainComponent final : public juce::Component,
                             public juce::FileDragAndDropTarget,
                             public juce::MenuBarModel,
-                            private juce::ChangeListener
+                            private juce::ChangeListener,
+                            private juce::Timer
 {
 public:
     struct Intents
@@ -67,14 +69,14 @@ public:
         std::function<void (bool play)> playOtherPartChanged;
         std::function<void (bool play)> playBackingChanged;
         std::function<void (bool on)> countInChanged;
-        std::function<void (std::size_t part, int assignment)> partAssignmentChanged;
-        std::function<void (std::size_t part, bool muted)> partMuteChanged;
-        std::function<void (std::size_t part, double volume)> partVolumeChanged;
+        std::function<void()> showTracksWindow;
+        /** The side panel was resized or collapsed (saved for the next start). */
+        std::function<void (int width, bool collapsed)> sidebarChanged;
+        std::function<void (bool follow)> followChanged;
         std::function<void()> openSongFolder;
         std::function<void()> showLibrary;
         std::function<void()> openLibraryFolder;
         std::function<void()> checkForUpdates;
-        std::function<void (std::size_t part, int soundId)> partSoundChanged; ///< SoundView ids; 0 = default sound
         std::function<void (std::uint8_t pitch, bool down)> keyClicked;
 
         std::function<void (int soundId)> soundChosen; ///< SoundView ids
@@ -102,11 +104,13 @@ public:
     void setVolume (float gain) { volume_.setValue (gain, juce::dontSendNotification); }
     void setTempo (int percent);
     void setLoop (bool enabled, double startSeconds, double endSeconds);
-    /** Per-track volume and mute as saved for the song. */
-    void setTrackMix (std::vector<bool> muted, std::vector<double> volumes);
+    /** The tracks as the tracks window shows them; the side panel shows a summary. */
+    void setTracks (const std::vector<TrackRowView>& rows);
+    /** Side panel width and state, and whether the roll follows the playhead. */
+    void setLayoutChoices (int sidebarWidth, bool collapsed, bool follow);
+    /** A short message that goes away by itself. */
+    void showToast (const juce::String& text);
     void setRecentFiles (std::vector<std::string> utf8Paths);
-    /** Per-part sound choice shown in the tracks list (SoundView ids, 0 = default). */
-    void setPartSounds (std::vector<int> soundIds);
     void setAppearance (bool light, double scale);
 
     bool keyPressed (const juce::KeyPress& key) override;
@@ -126,40 +130,35 @@ public:
     void menuItemSelected (int, int) override {}
 
 private:
-    struct PartRow
-    {
-        std::size_t part = 0;
-        std::unique_ptr<juce::Component> head; ///< label (piano part) or play toggle (other track)
-        std::unique_ptr<juce::ComboBox> role;
-        std::unique_ptr<juce::ComboBox> sound;
-        std::unique_ptr<juce::Slider> volume;
-        std::unique_ptr<juce::Label> detail;
-    };
-
-    /** The tracks list inside the side panel's scrollable area. */
-    class TrackList final : public juce::Component
+    /** The draggable edge between the roll and the side panel. */
+    class Splitter final : public juce::Component, public juce::SettableTooltipClient
     {
     public:
-        explicit TrackList (MainComponent& owner) : owner_ (owner) {}
-        void resized() override;
-        int preferredHeight() const;
-        std::vector<PartRow> rows;
-        juce::Label pianoHeader, otherHeader;
+        explicit Splitter (MainComponent& owner) : owner_ (owner) { setMouseCursor (juce::MouseCursor::LeftRightResizeCursor); }
+        void paint (juce::Graphics& g) override;
+        void mouseDown (const juce::MouseEvent& e) override;
+        void mouseDrag (const juce::MouseEvent& e) override;
+        void mouseUp (const juce::MouseEvent& e) override;
+        void mouseDoubleClick (const juce::MouseEvent&) override;
+        void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+        void mouseExit (const juce::MouseEvent&) override { repaint(); }
 
     private:
         MainComponent& owner_;
+        int startWidth_ = 0;
     };
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { showTab (tabs_.getCurrentTabIndex()); }
-    void rebuildPartList();
     void showTab (int index);
     void refreshStatus();
     void refreshColours();
     void refreshSoundBoxes();
     void layoutSidebar (juce::Rectangle<int> area);
-    juce::ComboBox* makeRoleBox (std::size_t part, int assignment);
-    juce::ComboBox* makeSoundBox (std::size_t part);
     void fillSoundBox (juce::ComboBox& box, bool withDefault, bool withActions) const;
+    void timerCallback() override;
+    void setSidebar (int width, bool collapsed, bool notify);
+    int maxSidebarWidth() const;
+    void refreshModeBadge();
     void setMode (int mode);
     juce::String positionText() const;
 
@@ -169,9 +168,7 @@ private:
     TransportView transport_;
     PracticeView practice_;
     SoundView sound_;
-    std::vector<int> partSounds_;
-    std::vector<bool> muted_;
-    std::vector<double> volumes_;
+    std::vector<TrackRowView> tracks_;
     bool loopEnabled_ = false;
     double loopStart_ = 0.0, loopEnd_ = 0.0;
     void toggleLoop();
@@ -220,15 +217,31 @@ private:
     juce::ToggleButton otherPartToggle_;
     juce::ToggleButton backingToggle_;
     juce::TextButton tracksButton_;
-    bool tracksOpen_ = true;
-    juce::Viewport tracksView_;
-    TrackList trackList_ { *this };
+    juce::Label tracksSummary_;
+    juce::Viewport sideView_;
+    juce::Component sideContent_;
     juce::Slider volume_ { juce::Slider::LinearHorizontal, juce::Slider::NoTextBox };
     juce::ComboBox soundBox_;
     juce::TextButton instrumentWindowButton_;
     juce::Label ringNote_;
 
     juce::Rectangle<int> headerArea_, sidebarArea_, rollPanel_;
+
+    // Side panel width: dragged on the splitter, collapsed with the arrow.
+    static constexpr int defaultSidebarWidth = 300;
+    static constexpr int minSidebarWidth = 260;
+    static constexpr int minRollWidth = 560;
+    int sidebarWidth_ = defaultSidebarWidth;
+    bool sidebarCollapsed_ = false;
+    Splitter splitter_ { *this };
+    juce::TextButton collapseButton_;
+
+    // Mode of the transport and the roll's view
+    juce::Label modeBadge_;
+    juce::TextButton zoomOut_, zoomIn_, zoomAll_, toPlayhead_;
+    juce::ToggleButton followToggle_;
+    bool follow_ = true;
+    juce::Label toast_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

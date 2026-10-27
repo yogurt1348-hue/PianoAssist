@@ -145,6 +145,8 @@ void LessonController::rebuild (double position, const char* why, bool live)
             const auto part = song->partIndexOf (note);
             if (part >= 0 && static_cast<std::size_t> (part) < muted.size() && muted[static_cast<std::size_t> (part)])
                 return false;
+            if (part >= 0 && song->parts[static_cast<std::size_t> (part)].assignment == timeline::Part::Assignment::excluded)
+                return false; // excluded: neither checked nor played
             return lesson::isPlayedByApp (note.role, practising, mode, accompaniment);
         },
         [song, gains] (const timeline::Note& note) {

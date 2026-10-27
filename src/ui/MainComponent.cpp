@@ -10,13 +10,12 @@ namespace pianoassist::ui
 namespace
 {
 constexpr int headerHeight = 58;
-constexpr int sidebarWidth = 300;
 constexpr int gap = 10;
 constexpr int tempoChoices[] = { 25, 40, 50, 60, 70, 75, 80, 90, 100, 110, 120, 150, 200 };
 
 bool isPianoAssignment (int assignment)
 {
-    return assignment != 3; // 0 right, 1 left, 2 split; 3 other track
+    return assignment <= 2; // 0 right, 1 left, 2 split; 3 accompaniment, 4 excluded
 }
 
 juce::String toJuce (const std::string& text)
@@ -70,57 +69,40 @@ juce::String noteList (const std::vector<std::uint8_t>& pitches)
 
 // ---------------------------------------------------------------------------
 
-void MainComponent::TrackList::resized()
+void MainComponent::Splitter::paint (juce::Graphics& g)
 {
-    auto area = getLocalBounds();
-    bool pianoDone = false, otherDone = false;
-    for (auto& row : rows)
-    {
-        const bool piano = dynamic_cast<juce::Label*> (row.head.get()) != nullptr;
-        if (piano && ! pianoDone)
-        {
-            pianoHeader.setBounds (area.removeFromTop (22));
-            pianoDone = true;
-        }
-        if (! piano && ! otherDone)
-        {
-            area.removeFromTop (6);
-            otherHeader.setBounds (area.removeFromTop (22));
-            otherDone = true;
-        }
-        row.head->setBounds (area.removeFromTop (24));
-        auto boxes = area.removeFromTop (26).withTrimmedLeft (piano ? 0 : 26);
-        if (row.sound != nullptr)
-        {
-            row.role->setBounds (boxes.removeFromLeft (boxes.getWidth() / 2 - 2));
-            boxes.removeFromLeft (4);
-            row.sound->setBounds (boxes);
-        }
-        else
-            row.role->setBounds (boxes);
-        auto line = area.removeFromTop (20).withTrimmedLeft (piano ? 0 : 26);
-        if (row.volume != nullptr)
-            row.volume->setBounds (line.removeFromRight (std::min (110, line.getWidth() / 2)));
-        row.detail->setBounds (line);
-        area.removeFromTop (6);
-    }
-    pianoHeader.setVisible (pianoDone);
-    otherHeader.setVisible (otherDone);
-    juce::ignoreUnused (owner_);
+    const bool hot = isMouseOverOrDragging();
+    g.setColour (hot ? theme::accent.withAlpha (0.7f) : theme::panelEdge);
+    g.fillRect (getLocalBounds().withSizeKeepingCentre (hot ? 3 : 1, getHeight()));
+    // Grip dots in the middle
+    g.setColour (hot ? theme::accent : theme::mutedText.withAlpha (0.6f));
+    const auto c = getLocalBounds().getCentre().toFloat();
+    for (int i = -2; i <= 2; ++i)
+        g.fillEllipse (c.x - 1.5f, c.y + static_cast<float> (i) * 7.0f - 1.5f, 3.0f, 3.0f);
 }
 
-int MainComponent::TrackList::preferredHeight() const
+void MainComponent::Splitter::mouseDown (const juce::MouseEvent&)
 {
-    int height = 0;
-    bool piano = false, other = false;
-    for (const auto& row : rows)
-    {
-        const bool isPiano = dynamic_cast<juce::Label*> (row.head.get()) != nullptr;
-        if (isPiano && ! piano) { height += 22; piano = true; }
-        if (! isPiano && ! other) { height += 28; other = true; }
-        height += 24 + 26 + 20 + 6;
-    }
-    return height;
+    startWidth_ = owner_.sidebarCollapsed_ ? 0 : owner_.sidebarWidth_;
+}
+
+void MainComponent::Splitter::mouseDrag (const juce::MouseEvent& e)
+{
+    const int width = startWidth_ - e.getDistanceFromDragStartX();
+    if (width < minSidebarWidth / 2)
+        owner_.setSidebar (owner_.sidebarWidth_, true, false); // dragged nearly shut: collapse
+    else
+        owner_.setSidebar (std::clamp (width, minSidebarWidth, owner_.maxSidebarWidth()), false, false);
+}
+
+void MainComponent::Splitter::mouseUp (const juce::MouseEvent&)
+{
+    owner_.setSidebar (owner_.sidebarWidth_, owner_.sidebarCollapsed_, true);
+}
+
+void MainComponent::Splitter::mouseDoubleClick (const juce::MouseEvent&)
+{
+    owner_.setSidebar (defaultSidebarWidth, false, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -258,19 +240,68 @@ MainComponent::MainComponent (Intents intents)
     backingToggle_.setButtonText (TRANS ("Other tracks"));
     backingToggle_.setTooltip (TRANS ("Play the band: drums, bass, strings and other non-piano tracks"));
     backingToggle_.onClick = [this] { if (intents_.playBackingChanged) intents_.playBackingChanged (backingToggle_.getToggleState()); };
-    tracksButton_.onClick = [this] {
-        tracksOpen_ = ! tracksOpen_;
-        resized();
+    tracksButton_.setButtonText (TRANS ("Tracks and instruments..."));
+    tracksButton_.setTooltip (TRANS ("Roles, sounds, volume, Mute and Solo of every track, in a separate window"));
+    tracksButton_.onClick = [this] { if (intents_.showTracksWindow) intents_.showTracksWindow(); };
+    tracksSummary_.setFont (juce::FontOptions (13.5f));
+    tracksSummary_.setJustificationType (juce::Justification::topLeft);
+    tracksSummary_.setMinimumHorizontalScale (1.0f);
+
+    // The edge between the roll and the side panel
+    splitter_.setTitle (TRANS ("Side panel edge"));
+    splitter_.setTooltip (TRANS ("Drag to change the side panel width. Double-click for the standard width."));
+    addAndMakeVisible (splitter_);
+    collapseButton_.setTooltip (TRANS ("Hide or show the side panel"));
+    collapseButton_.onClick = [this] { setSidebar (sidebarWidth_, ! sidebarCollapsed_, true); };
+    addAndMakeVisible (collapseButton_);
+
+    // Mode of the transport
+    modeBadge_.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    modeBadge_.setJustificationType (juce::Justification::centred);
+    addAndMakeVisible (modeBadge_);
+
+    // Roll view controls
+    zoomOut_.setButtonText (juce::String::fromUTF8 ("\xe2\x88\x92"));
+    zoomOut_.setTooltip (TRANS ("Zoom out (Ctrl+wheel over the roll)"));
+    zoomOut_.onClick = [this] { roll_.zoomBy (1.0 / 1.4); tracksRoll_.setPixelsPerSecond (roll_.pixelsPerSecond()); };
+    zoomIn_.setButtonText ("+");
+    zoomIn_.setTooltip (TRANS ("Zoom in (Ctrl+wheel over the roll)"));
+    zoomIn_.onClick = [this] { roll_.zoomBy (1.4); tracksRoll_.setPixelsPerSecond (roll_.pixelsPerSecond()); };
+    zoomAll_.setButtonText (TRANS ("Whole song"));
+    zoomAll_.setTooltip (TRANS ("Fit the whole song into the view"));
+    zoomAll_.onClick = [this] {
+        auto& shown = tab_ == 0 ? roll_ : tracksRoll_;
+        shown.showWholeSong();
+        (tab_ == 0 ? tracksRoll_ : roll_).setPixelsPerSecond (shown.pixelsPerSecond());
     };
-    tracksView_.setViewedComponent (&trackList_, false);
-    tracksView_.setScrollBarsShown (true, false);
-    trackList_.pianoHeader.setText (TRANS ("Piano parts: who plays what"), juce::dontSendNotification);
-    trackList_.otherHeader.setText (TRANS ("Other tracks: on/off and sound"), juce::dontSendNotification);
-    for (auto* label : { &trackList_.pianoHeader, &trackList_.otherHeader })
-    {
-        label->setFont (juce::FontOptions (12.5f, juce::Font::bold));
-        trackList_.addChildComponent (label);
-    }
+    toPlayhead_.setButtonText (TRANS ("To the playhead"));
+    toPlayhead_.setTooltip (TRANS ("Scroll back to the playhead and follow it again"));
+    toPlayhead_.onClick = [this] {
+        roll_.goToPlayhead();
+        tracksRoll_.goToPlayhead();
+        toPlayhead_.setToggleState (false, juce::dontSendNotification);
+    };
+    followToggle_.setButtonText (TRANS ("Follow the playhead"));
+    followToggle_.setTooltip (TRANS ("The view scrolls with the playhead. It only moves the view, never the music."));
+    followToggle_.setToggleState (true, juce::dontSendNotification);
+    followToggle_.onClick = [this] {
+        follow_ = followToggle_.getToggleState();
+        if (follow_)
+        {
+            roll_.goToPlayhead();
+            tracksRoll_.goToPlayhead();
+        }
+        if (intents_.followChanged)
+            intents_.followChanged (follow_);
+    };
+    for (auto* c : std::initializer_list<juce::Component*> { &zoomOut_, &zoomIn_, &zoomAll_, &toPlayhead_, &followToggle_ })
+        addChildComponent (c);
+    for (auto* roll : { &roll_, &tracksRoll_ })
+        roll->onUserScrolledChanged = [this] (bool away) { toPlayhead_.setToggleState (away && follow_, juce::dontSendNotification); };
+
+    toast_.setFont (juce::FontOptions (14.0f));
+    toast_.setJustificationType (juce::Justification::centred);
+    addChildComponent (toast_);
     volume_.setRange (0.0, 1.0);
     volume_.setValue (0.8, juce::dontSendNotification);
     volume_.setTitle (TRANS ("Volume"));
@@ -298,11 +329,17 @@ MainComponent::MainComponent (Intents intents)
     ringNote_.setText (TRANS ("Sound may keep fading after a stop. \"Silence\" cuts it at once."), juce::dontSendNotification);
     ringNote_.setFont (juce::FontOptions (12.5f));
     ringNote_.setJustificationType (juce::Justification::topLeft);
+    addAndMakeVisible (waitToggle_);
+    // The side panel scrolls when the window is too low for all of it.
     for (auto* c : std::initializer_list<juce::Component*> {
-             &modeCaption_, &modeBoth_, &modeRight_, &modeLeft_, &waitToggle_, &timingCaption_, &toleranceBox_,
-             &accompanimentCaption_, &otherPartToggle_, &backingToggle_, &tracksButton_, &tracksView_, &volumeCaption_,
+             &modeCaption_, &modeBoth_, &modeRight_, &modeLeft_, &timingCaption_, &toleranceBox_,
+             &accompanimentCaption_, &otherPartToggle_, &backingToggle_, &tracksButton_, &tracksSummary_, &volumeCaption_,
              &volume_, &soundCaption_, &soundBox_, &instrumentWindowButton_, &ringNote_ })
-        addAndMakeVisible (c);
+        sideContent_.addAndMakeVisible (c);
+    sideView_.setViewedComponent (&sideContent_, false);
+    sideView_.setScrollBarsShown (true, false);
+    sideView_.setScrollBarThickness (10);
+    addAndMakeVisible (sideView_);
 
     setWantsKeyboardFocus (true);
     setFocusContainerType (juce::Component::FocusContainerType::keyboardFocusContainer);
@@ -338,8 +375,8 @@ void MainComponent::setTransport (const TransportView& view)
     positionLabel_.setText (positionText(), juce::dontSendNotification);
     ringNote_.setColour (juce::Label::textColourId, view.mayRingOut && ! running ? theme::warning : theme::mutedText);
 
-    roll_.setPlayhead (view.positionSeconds, running && tab_ == 0);
-    tracksRoll_.setPlayhead (view.positionSeconds, running && tab_ == 1);
+    roll_.setPlayhead (view.positionSeconds, follow_ && running && tab_ == 0);
+    tracksRoll_.setPlayhead (view.positionSeconds, follow_ && running && tab_ == 1);
     refreshStatus();
 }
 
@@ -403,17 +440,63 @@ void MainComponent::toggleLoop()
         intents_.loopChanged (loopEnabled_, loopStart_, loopEnd_);
 }
 
-void MainComponent::setTrackMix (std::vector<bool> muted, std::vector<double> volumes)
+void MainComponent::setTracks (const std::vector<TrackRowView>& rows)
 {
-    muted_ = std::move (muted);
-    volumes_ = std::move (volumes);
-    for (auto& row : trackList_.rows)
-    {
-        if (auto* toggle = dynamic_cast<juce::ToggleButton*> (row.head.get()))
-            toggle->setToggleState (row.part >= muted_.size() || ! muted_[row.part], juce::dontSendNotification);
-        if (row.volume != nullptr)
-            row.volume->setValue (row.part < volumes_.size() ? volumes_[row.part] : 1.0, juce::dontSendNotification);
-    }
+    tracks_ = rows;
+    tracksSummary_.setText (TracksComponent::summary (tracks_), juce::dontSendNotification);
+    int backingCount = 0;
+    for (const auto& r : tracks_)
+        backingCount += r.assignment == 3 ? 1 : 0;
+    tabs_.setTabName (1, backingCount > 0 ? TRANS ("Other tracks") + " (" + juce::String (backingCount) + ")" : TRANS ("Other tracks"));
+    resized();
+}
+
+void MainComponent::setLayoutChoices (int sidebarWidth, bool collapsed, bool follow)
+{
+    follow_ = follow;
+    followToggle_.setToggleState (follow, juce::dontSendNotification);
+    setSidebar (sidebarWidth, collapsed, false);
+}
+
+void MainComponent::showToast (const juce::String& text)
+{
+    toast_.setText (text, juce::dontSendNotification);
+    toast_.setVisible (text.isNotEmpty());
+    toast_.toFront (false);
+    resized();
+    startTimer (7000);
+}
+
+void MainComponent::timerCallback()
+{
+    stopTimer();
+    toast_.setVisible (false);
+}
+
+int MainComponent::maxSidebarWidth() const
+{
+    return std::max (minSidebarWidth, getWidth() - minRollWidth);
+}
+
+void MainComponent::setSidebar (int width, bool collapsed, bool notify)
+{
+    sidebarWidth_ = std::clamp (width, minSidebarWidth, 1200);
+    sidebarCollapsed_ = collapsed;
+    collapseButton_.setButtonText (juce::String::fromUTF8 (collapsed ? "\xe2\x80\xb9" : "\xe2\x80\xba"));
+    resized();
+    menuItemsChanged();
+    if (notify && intents_.sidebarChanged)
+        intents_.sidebarChanged (sidebarWidth_, sidebarCollapsed_);
+}
+
+void MainComponent::refreshModeBadge()
+{
+    const bool waiting = practice_.practising;
+    modeBadge_.setText (waiting ? TRANS ("Practice with waiting") : TRANS ("Free playback"), juce::dontSendNotification);
+    modeBadge_.setColour (juce::Label::textColourId, waiting ? theme::onAccent : theme::text);
+    modeBadge_.setColour (juce::Label::backgroundColourId, waiting ? theme::accent : theme::control);
+    modeBadge_.setTooltip (waiting ? TRANS ("The song stops at your notes until you play them")
+                                   : TRANS ("The song plays on; nothing is checked"));
 }
 
 void MainComponent::setRecentFiles (std::vector<std::string> utf8Paths)
@@ -463,19 +546,6 @@ void MainComponent::refreshSoundBoxes()
 {
     fillSoundBox (soundBox_, false, true);
     soundBox_.setSelectedId (sound_.selected, juce::dontSendNotification);
-    for (auto& row : trackList_.rows)
-        if (row.sound != nullptr)
-        {
-            fillSoundBox (*row.sound, true, false);
-            const auto chosen = row.part < partSounds_.size() ? partSounds_[row.part] : 0;
-            row.sound->setSelectedId (chosen == 0 ? 1000 : chosen, juce::dontSendNotification);
-        }
-}
-
-void MainComponent::setPartSounds (std::vector<int> soundIds)
-{
-    partSounds_ = std::move (soundIds);
-    refreshSoundBoxes();
 }
 
 void MainComponent::setPractice (const PracticeView& view)
@@ -491,6 +561,7 @@ void MainComponent::setPractice (const PracticeView& view)
     otherPartToggle_.setEnabled (view.mode != 0);
     backingToggle_.setToggleState (view.playBacking, juce::dontSendNotification);
     board_.setView (view);
+    refreshModeBadge();
     refreshStatus();
 }
 
@@ -564,7 +635,7 @@ void MainComponent::setSong (std::shared_ptr<const PianoRollView> song)
                     juce::dontSendNotification);
     juce::String notices;
     if (song_ && song_->needsPartCheck)
-        notices = TRANS ("Hands were guessed from pitch: check the parts marked ? in the side panel.");
+        notices = TRANS ("Hands were guessed from pitch: check the parts marked ? in Tracks and instruments.");
     if (song_)
         for (const auto& notice : song_->notices)
             notices << (notices.isEmpty() ? "" : "  ") << toJuce (notice);
@@ -577,15 +648,10 @@ void MainComponent::setSong (std::shared_ptr<const PianoRollView> song)
             roll_.setPartVisible (i, piano);
             tracksRoll_.setPartVisible (i, ! piano);
         }
-    if (! song_ || muted_.size() != song_->parts.size())
-        muted_.assign (song_ ? song_->parts.size() : 0, false);
-    if (! song_ || volumes_.size() != song_->parts.size())
-        volumes_.assign (song_ ? song_->parts.size() : 0, 1.0);
     if (changed)
         setLoop (false, 0.0, 0.0);
-    if (changed && ! song_)
-        partSounds_.clear();
-    rebuildPartList();
+    if (! song_)
+        setTracks ({});
     menuItemsChanged();
     showTab (tab_);
 }
@@ -608,7 +674,7 @@ void MainComponent::refreshColours()
     for (auto* label : { &crumb_, &positionLabel_, &tempoLabel_, &emptyHint_, &tracksEmpty_, &modeCaption_, &timingCaption_,
                          &accompanimentCaption_, &volumeCaption_, &soundCaption_ })
         label->setColour (juce::Label::textColourId, theme::mutedText);
-    for (auto* label : { &appName_, &title_, &trackList_.pianoHeader, &trackList_.otherHeader })
+    for (auto* label : { &appName_, &title_, &tracksSummary_ })
         label->setColour (juce::Label::textColourId, theme::text);
     notices_.setColour (juce::Label::textColourId, theme::warning);
     if (! transport_.mayRingOut)
@@ -618,9 +684,10 @@ void MainComponent::refreshColours()
                      || input_.status == InputMonitorView::Status::noDevices;
     connection_.setColour (juce::TextButton::textColourOffId, ok ? theme::good : bad ? theme::danger : theme::warning);
     connection_.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
-    for (auto& row : trackList_.rows)
-        if (row.detail != nullptr)
-            row.detail->setColour (juce::Label::textColourId, theme::mutedText);
+    toast_.setColour (juce::Label::textColourId, theme::text);
+    toast_.setColour (juce::Label::backgroundColourId, theme::control);
+    toast_.setColour (juce::Label::outlineColourId, theme::good);
+    refreshModeBadge();
     repaint();
 }
 
@@ -686,126 +753,6 @@ void MainComponent::refreshStatus()
     }
 }
 
-// --- tracks list ------------------------------------------------------------
-
-juce::ComboBox* MainComponent::makeRoleBox (std::size_t part, int assignment)
-{
-    auto* role = new juce::ComboBox();
-    role->addItem (TRANS ("Right hand"), 1);
-    role->addItem (TRANS ("Left hand"), 2);
-    role->addItem (TRANS ("Both hands (split at C4)"), 3);
-    role->addItem (TRANS ("Other track (app plays it)"), 4);
-    role->setSelectedId (assignment + 1, juce::dontSendNotification);
-    role->setTitle (TRANS ("Who plays this part"));
-    role->setTooltip (TRANS ("Who plays this part. Change it if the guess is wrong."));
-    role->onChange = [this, part, role] {
-        // Deferred: the change rebuilds this list, which deletes this box.
-        const int chosen = role->getSelectedId() - 1;
-        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), part, chosen] {
-            if (safe != nullptr && safe->intents_.partAssignmentChanged)
-                safe->intents_.partAssignmentChanged (part, chosen);
-        });
-    };
-    return role;
-}
-
-juce::ComboBox* MainComponent::makeSoundBox (std::size_t part)
-{
-    auto* box = new juce::ComboBox();
-    box->setTitle (TRANS ("Sound of this track"));
-    box->setTooltip (TRANS ("The instrument for this track. \"Main sound\" uses the sound chosen below."));
-    box->onChange = [this, part, box] {
-        const int id = box->getSelectedId();
-        const int chosen = id == 1000 ? 0 : id;
-        if (part >= partSounds_.size())
-            partSounds_.resize (part + 1, 0);
-        if (partSounds_[part] == chosen)
-            return;
-        partSounds_[part] = chosen;
-        if (intents_.partSoundChanged)
-            intents_.partSoundChanged (part, chosen);
-    };
-    return box;
-}
-
-void MainComponent::rebuildPartList()
-{
-    for (auto& row : trackList_.rows)
-        for (auto* c : std::initializer_list<juce::Component*> { row.head.get(), row.role.get(), row.sound.get(), row.volume.get(), row.detail.get() })
-            if (c != nullptr)
-                trackList_.removeChildComponent (c);
-    trackList_.rows.clear();
-    int backingCount = 0;
-    if (song_)
-    {
-        std::vector<PartRow> piano, other;
-        for (std::size_t i = 0; i < song_->parts.size(); ++i)
-        {
-            const auto& part = song_->parts[i];
-            PartRow row;
-            row.part = i;
-            row.role.reset (makeRoleBox (i, part.assignment));
-            row.detail = std::make_unique<juce::Label>();
-            row.detail->setFont (juce::FontOptions (12.0f));
-            row.detail->setColour (juce::Label::textColourId, theme::mutedText);
-            row.detail->setText (toJuce (part.detail), juce::dontSendNotification);
-            row.volume = std::make_unique<juce::Slider> (juce::Slider::LinearHorizontal, juce::Slider::NoTextBox);
-            row.volume->setRange (0.0, 1.0);
-            row.volume->setValue (i < volumes_.size() ? volumes_[i] : 1.0, juce::dontSendNotification);
-            row.volume->setTitle (TRANS ("Track volume"));
-            row.volume->setTooltip (TRANS ("Volume of this track"));
-            {
-                auto* slider = row.volume.get();
-                slider->onDragEnd = [this, i, slider] {
-                    if (i >= volumes_.size())
-                        volumes_.resize (i + 1, 1.0);
-                    volumes_[i] = slider->getValue();
-                    if (intents_.partVolumeChanged)
-                        intents_.partVolumeChanged (i, slider->getValue());
-                };
-            }
-            if (isPianoAssignment (part.assignment))
-            {
-                auto label = std::make_unique<juce::Label>();
-                label->setText (toJuce ((part.guessedFromPitch ? "? " : "") + part.label), juce::dontSendNotification);
-                label->setColour (juce::Label::textColourId, roleColour (part.role));
-                label->setFont (juce::FontOptions (14.0f, juce::Font::bold));
-                if (part.guessedFromPitch)
-                    label->setTooltip (TRANS ("Guessed from pitch: please check"));
-                row.head = std::move (label);
-                piano.push_back (std::move (row));
-            }
-            else
-            {
-                ++backingCount;
-                auto play = std::make_unique<juce::ToggleButton> (toJuce (part.instrument + " · " + part.label));
-                play->setToggleState (i >= muted_.size() || ! muted_[i], juce::dontSendNotification);
-                play->setTooltip (TRANS ("Play this track. Untick to mute it."));
-                auto* raw = play.get();
-                play->onClick = [this, i, raw] {
-                    if (i < muted_.size())
-                        muted_[i] = ! raw->getToggleState();
-                    if (intents_.partMuteChanged)
-                        intents_.partMuteChanged (i, ! raw->getToggleState());
-                };
-                row.head = std::move (play);
-                row.sound.reset (makeSoundBox (i));
-                other.push_back (std::move (row));
-            }
-        }
-        for (auto* rows : { &piano, &other })
-            for (auto& row : *rows)
-                trackList_.rows.push_back (std::move (row));
-    }
-    for (auto& row : trackList_.rows)
-        for (auto* c : std::initializer_list<juce::Component*> { row.head.get(), row.role.get(), row.sound.get(), row.volume.get(), row.detail.get() })
-            if (c != nullptr)
-                trackList_.addAndMakeVisible (c);
-    tabs_.setTabName (1, backingCount > 0 ? TRANS ("Other tracks") + " (" + juce::String (backingCount) + ")" : TRANS ("Other tracks"));
-    tracksButton_.setButtonText (TRANS ("Tracks and instruments") + "  " + juce::String::fromUTF8 (tracksOpen_ ? "\xe2\x96\xb4" : "\xe2\x96\xbe"));
-    refreshSoundBoxes();
-}
-
 void MainComponent::showTab (int index)
 {
     tab_ = index;
@@ -817,14 +764,17 @@ void MainComponent::showTab (int index)
     roll_.setVisible (hasSong && mine);
     tracksRoll_.setVisible (hasSong && ! mine);
     bool anyOther = false;
-    for (const auto& row : trackList_.rows)
-        anyOther = anyOther || row.sound != nullptr;
+    if (song_)
+        for (const auto& part : song_->parts)
+            anyOther = anyOther || part.assignment == 3;
     tracksEmpty_.setVisible (hasSong && ! mine && ! anyOther);
     emptyOpenButton_.setVisible (! hasSong);
     emptyHint_.setVisible (! hasSong);
     for (auto* button : recentButtons_)
         button->setVisible (! hasSong);
-    resized();
+    for (auto* c : std::initializer_list<juce::Component*> { &zoomOut_, &zoomIn_, &zoomAll_, &toPlayhead_, &followToggle_ })
+        c->setVisible (hasSong);
+    resized(); // hides the view controls that do not fit
 }
 
 // --- layout -----------------------------------------------------------------
@@ -854,56 +804,111 @@ void MainComponent::resized()
     {
         auto header = headerArea_.reduced (20, 10);
         appName_.setBounds (header.removeFromLeft (130));
-        menuBar_.setBounds (header.removeFromLeft (std::min (380, header.getWidth() / 2)).withSizeKeepingCentre (std::min (380, header.getWidth() / 2), 36));
         settingsButton_.setBounds (header.removeFromRight (120));
         header.removeFromRight (10);
-        connection_.setBounds (header.removeFromRight (std::min (300, header.getWidth())));
+        // The menus keep their full width (about 340); the connection takes the rest.
+        const int menuWidth = std::min (380, header.getWidth());
+        const int connectionWidth = std::clamp (header.getWidth() - menuWidth - 10, 0, 300);
+        connection_.setBounds (header.removeFromRight (connectionWidth));
+        menuBar_.setBounds (header.removeFromLeft (menuWidth).withSizeKeepingCentre (menuWidth, 36));
     }
 
-    const bool narrow = area.getWidth() < 980;
-    sidebarArea_ = narrow ? juce::Rectangle<int>() : area.removeFromRight (sidebarWidth);
+    // Side panel: as wide as chosen, but the roll keeps its minimum width.
+    // Collapsed (or no room), its essentials move into a row above the roll.
+    const bool roomForPanel = area.getWidth() >= minSidebarWidth + minRollWidth;
+    const bool panel = roomForPanel && ! sidebarCollapsed_;
+    const int width = std::clamp (sidebarWidth_, minSidebarWidth, std::max (minSidebarWidth, area.getWidth() - minRollWidth));
+    sidebarArea_ = panel ? area.removeFromRight (width) : juce::Rectangle<int>();
+    auto edge = area.removeFromRight (roomForPanel ? 14 : 0);
+    splitter_.setVisible (panel);
+    splitter_.setBounds (edge);
+    collapseButton_.setVisible (roomForPanel);
+    collapseButton_.setBounds (edge.getX() - 4, area.getY() + 12, 22, 34);
+    collapseButton_.toFront (false);
     layoutSidebar (sidebarArea_);
+    const bool narrow = ! panel;
 
     auto main = area.reduced (20, 14);
+    main.removeFromRight (4);
     crumb_.setBounds (main.removeFromTop (18));
-    title_.setBounds (main.removeFromTop (34));
+    {
+        auto titleRow = main.removeFromTop (34);
+        modeBadge_.setBounds (titleRow.removeFromRight (std::min (240, titleRow.getWidth() / 3)).reduced (0, 4));
+        titleRow.removeFromRight (10);
+        title_.setBounds (titleRow);
+    }
     notices_.setVisible (notices_.getText().isNotEmpty());
     if (notices_.isVisible())
         notices_.setBounds (main.removeFromTop (20));
     main.removeFromTop (6);
 
+    // Transport: buttons and "Wait for my notes", then position and tempo;
+    // on a narrow window the second half goes to its own row.
     auto bar = main.removeFromTop (38);
-    playButton_.setBounds (bar.removeFromLeft (118));
+    const bool twoRows = bar.getWidth() < 900;
+    playButton_.setBounds (bar.removeFromLeft (112));
     bar.removeFromLeft (8);
-    stopButton_.setBounds (bar.removeFromLeft (84));
+    stopButton_.setBounds (bar.removeFromLeft (80));
     bar.removeFromLeft (8);
-    silenceButton_.setBounds (bar.removeFromLeft (104));
+    silenceButton_.setBounds (bar.removeFromLeft (100));
     bar.removeFromLeft (8);
     loopButton_.setBounds (bar.removeFromLeft (84));
     bar.removeFromLeft (14);
+    waitToggle_.setBounds (bar.removeFromLeft (std::min (210, bar.getWidth())));
+    if (twoRows)
+    {
+        main.removeFromTop (6);
+        bar = main.removeFromTop (32);
+    }
+    else
+        bar.removeFromLeft (10);
     tempoBox_.setBounds (bar.removeFromRight (96));
     tempoLabel_.setBounds (bar.removeFromRight (64));
     positionLabel_.setBounds (bar);
     main.removeFromTop (gap);
 
-    keyboard_.setBounds (main.removeFromBottom (92));
-    main.removeFromBottom (gap);
-    board_.setBounds (main.removeFromBottom (80));
+    // A low window (or a large interface size) keeps the roll usable:
+    // the status strip gets compact, then the keyboard goes.
+    int keyboardHeight = 92, boardHeight = 80;
+    const int spare = main.getHeight() - 2 * gap - 180 - (narrow ? 42 : 0);
+    if (spare < keyboardHeight + boardHeight)
+    {
+        boardHeight = 62;
+        keyboardHeight = spare - boardHeight >= 56 ? std::min (92, spare - boardHeight) : 0;
+    }
+    keyboard_.setVisible (keyboardHeight > 0);
+    if (keyboardHeight > 0)
+    {
+        keyboard_.setBounds (main.removeFromBottom (keyboardHeight));
+        main.removeFromBottom (gap);
+    }
+    board_.setBounds (main.removeFromBottom (boardHeight));
     main.removeFromBottom (gap);
 
+    // Hands, accompaniment and the tracks button live in the side panel, or
+    // in a row above the roll when the panel is hidden.
+    for (auto* c : std::initializer_list<juce::Component*> { &modeBoth_, &modeRight_, &modeLeft_, &otherPartToggle_, &backingToggle_,
+                                                              &tracksButton_ })
+    {
+        auto& parent = narrow ? static_cast<juce::Component&> (*this) : sideContent_;
+        if (c->getParentComponent() != &parent)
+            parent.addAndMakeVisible (c);
+        c->setVisible (c != &tracksButton_ || song_ != nullptr);
+    }
     if (narrow)
     {
-        // No room for the side panel: keep the essentials in a row above the roll.
-        auto row = main.removeFromTop (30);
+        // No side panel: hands, accompaniment and tracks in a row above the roll.
+        auto row = main.removeFromTop (32);
         for (auto* b : { &modeBoth_, &modeRight_, &modeLeft_ })
         {
-            b->setBounds (row.removeFromLeft (70));
+            b->setBounds (row.removeFromLeft (76));
             row.removeFromLeft (4);
         }
-        row.removeFromLeft (8);
-        waitToggle_.setBounds (row.removeFromLeft (190));
-        otherPartToggle_.setBounds (row.removeFromLeft (120));
-        backingToggle_.setBounds (row.removeFromLeft (130));
+        row.removeFromLeft (10);
+        otherPartToggle_.setBounds (row.removeFromLeft (std::min (150, row.getWidth())));
+        backingToggle_.setBounds (row.removeFromLeft (std::min (170, row.getWidth())));
+        tracksButton_.setVisible (song_ != nullptr && row.getWidth() >= 120);
+        tracksButton_.setBounds (row.removeFromRight (std::min (230, row.getWidth())));
         main.removeFromTop (gap);
     }
 
@@ -911,12 +916,35 @@ void MainComponent::resized()
     auto inner = rollPanel_.reduced (10);
     if (song_)
     {
-        tabs_.setBounds (inner.removeFromTop (30).withWidth (std::min (inner.getWidth(), 340)));
+        auto tabsRow = inner.removeFromTop (32);
+        // View controls on the right of the tabs. With little room the less
+        // needed ones step aside (they stay in the View menu); none is squeezed.
+        const int tabsWidth = std::min (300, tabsRow.getWidth() / 2);
+        auto controls = tabsRow.removeFromRight (tabsRow.getWidth() - tabsWidth - 8);
+        const int room = controls.getWidth() - 2 * 34 - 10;
+        const bool showPlayhead = room >= 156, showAll = room >= 156 + 146, showFollow = room >= 156 + 146 + 206;
+        toPlayhead_.setVisible (showPlayhead);
+        zoomAll_.setVisible (showAll);
+        followToggle_.setVisible (showFollow);
+        if (showFollow)
+            followToggle_.setBounds (controls.removeFromRight (200));
+        controls.removeFromRight (6);
+        if (showPlayhead)
+            toPlayhead_.setBounds (controls.removeFromRight (150));
+        controls.removeFromRight (6);
+        if (showAll)
+            zoomAll_.setBounds (controls.removeFromRight (140));
+        controls.removeFromRight (6);
+        zoomIn_.setBounds (controls.removeFromRight (34));
+        controls.removeFromRight (4);
+        zoomOut_.setBounds (controls.removeFromRight (34));
+        tabs_.setBounds (tabsRow.withWidth (tabsWidth));
         inner.removeFromTop (6);
     }
     roll_.setBounds (inner);
     tracksRoll_.setBounds (inner);
     tracksEmpty_.setBounds (inner.withSizeKeepingCentre (inner.getWidth(), 40));
+    toast_.setBounds (rollPanel_.withSizeKeepingCentre (std::min (rollPanel_.getWidth() - 40, 640), 40).withY (rollPanel_.getBottom() - 60));
 
     auto centre = inner.withSizeKeepingCentre (std::min (inner.getWidth(), 360), 220);
     emptyOpenButton_.setBounds (centre.removeFromTop (54).reduced (40, 0));
@@ -933,14 +961,15 @@ void MainComponent::resized()
 void MainComponent::layoutSidebar (juce::Rectangle<int> area)
 {
     const bool visible = ! area.isEmpty();
-    for (auto* c : std::initializer_list<juce::Component*> { &modeCaption_, &timingCaption_, &toleranceBox_, &accompanimentCaption_,
-                                                              &tracksButton_, &tracksView_, &volumeCaption_, &volume_,
-                                                              &soundCaption_, &soundBox_, &instrumentWindowButton_, &ringNote_ })
-        c->setVisible (visible);
+    sideView_.setVisible (visible);
     if (! visible)
         return;
+    sideView_.setBounds (area);
+    constexpr int neededHeight = 520; // everything, with the summary a few lines high
+    const bool scrolls = area.getHeight() < neededHeight;
+    sideContent_.setSize (area.getWidth() - (scrolls ? sideView_.getScrollBarThickness() : 0), std::max (area.getHeight(), neededHeight));
 
-    auto side = area.reduced (18, 16);
+    auto side = sideContent_.getLocalBounds().reduced (18, 16);
     modeCaption_.setBounds (side.removeFromTop (20));
     side.removeFromTop (4);
     auto modes = side.removeFromTop (38);
@@ -950,38 +979,30 @@ void MainComponent::layoutSidebar (juce::Rectangle<int> area)
     modeRight_.setBounds (modes.removeFromLeft (third));
     modes.removeFromLeft (4);
     modeLeft_.setBounds (modes);
-    side.removeFromTop (6);
-    waitToggle_.setBounds (side.removeFromTop (28));
-    side.removeFromTop (10);
+    side.removeFromTop (12);
     timingCaption_.setBounds (side.removeFromTop (20));
     toleranceBox_.setBounds (side.removeFromTop (30));
     side.removeFromTop (14);
 
-    // Bottom block first so the tracks list takes what is left.
-    auto bottom = side.removeFromBottom (190);
+    accompanimentCaption_.setBounds (side.removeFromTop (20));
+    otherPartToggle_.setBounds (side.removeFromTop (28));
+    backingToggle_.setBounds (side.removeFromTop (28));
+    side.removeFromTop (10);
+    tracksButton_.setBounds (side.removeFromTop (34));
+    side.removeFromTop (6);
+    // Bottom block, then the summary takes what is left (scrolled out of sight is fine: the window has it all).
+    auto bottom = side.removeFromBottom (std::min (side.getHeight(), 190));
+    tracksSummary_.setVisible (song_ != nullptr && side.getHeight() > 30);
+    tracksSummary_.setBounds (side);
     volumeCaption_.setBounds (bottom.removeFromTop (20));
     volume_.setBounds (bottom.removeFromTop (28));
     bottom.removeFromTop (8);
     soundCaption_.setBounds (bottom.removeFromTop (20));
     soundBox_.setBounds (bottom.removeFromTop (30));
     bottom.removeFromTop (6);
-    instrumentWindowButton_.setBounds (bottom.removeFromTop (28).removeFromLeft (130));
+    instrumentWindowButton_.setBounds (bottom.removeFromTop (28).removeFromLeft (150));
     bottom.removeFromTop (8);
     ringNote_.setBounds (bottom);
-
-    accompanimentCaption_.setBounds (side.removeFromTop (20));
-    otherPartToggle_.setBounds (side.removeFromTop (28));
-    backingToggle_.setBounds (side.removeFromTop (28));
-    side.removeFromTop (8);
-    tracksButton_.setVisible (song_ != nullptr);
-    tracksButton_.setBounds (side.removeFromTop (34));
-    side.removeFromTop (6);
-    tracksView_.setVisible (song_ != nullptr && tracksOpen_);
-    tracksView_.setBounds (side);
-    trackList_.setSize (side.getWidth() - (trackList_.preferredHeight() > side.getHeight() ? 10 : 0),
-                        trackList_.preferredHeight());
-    trackList_.resized(); // rows may be new while the size stayed the same
-    tracksButton_.setButtonText (TRANS ("Tracks and instruments") + "  " + juce::String::fromUTF8 (tracksOpen_ ? "\xe2\x96\xb4" : "\xe2\x96\xbe"));
 }
 
 // --- keyboard, menus, drag and drop ------------------------------------------
@@ -1062,16 +1083,15 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         {
             menu.addItem (TRANS ("My parts"), hasSong, tab_ == 0, [this] { showTab (0); });
             menu.addItem (TRANS ("Other tracks"), hasSong, tab_ == 1, [this] { showTab (1); });
-            menu.addItem (TRANS ("Side panel: tracks and instruments"), true, tracksOpen_, [this] { tracksOpen_ = ! tracksOpen_; resized(); });
+            menu.addItem (TRANS ("Tracks and instruments..."), hasSong, false, call (intents_.showTracksWindow));
+            menu.addItem (TRANS ("Side panel"), true, ! sidebarCollapsed_, [this] { setSidebar (sidebarWidth_, ! sidebarCollapsed_, true); });
+            menu.addItem (TRANS ("Standard side panel width"), true, false, [this] { setSidebar (defaultSidebarWidth, false, true); });
             menu.addSeparator();
-            menu.addItem (TRANS ("Zoom in"), hasSong, false, [this] {
-                roll_.setPixelsPerSecond (roll_.pixelsPerSecond() * 1.25);
-                tracksRoll_.setPixelsPerSecond (roll_.pixelsPerSecond());
-                if (intents_.zoomChanged) intents_.zoomChanged (roll_.pixelsPerSecond()); });
-            menu.addItem (TRANS ("Zoom out"), hasSong, false, [this] {
-                roll_.setPixelsPerSecond (roll_.pixelsPerSecond() / 1.25);
-                tracksRoll_.setPixelsPerSecond (roll_.pixelsPerSecond());
-                if (intents_.zoomChanged) intents_.zoomChanged (roll_.pixelsPerSecond()); });
+            menu.addItem (TRANS ("Zoom in"), hasSong, false, [this] { zoomIn_.triggerClick(); });
+            menu.addItem (TRANS ("Zoom out"), hasSong, false, [this] { zoomOut_.triggerClick(); });
+            menu.addItem (TRANS ("Whole song"), hasSong, false, [this] { zoomAll_.triggerClick(); });
+            menu.addItem (TRANS ("To the playhead"), hasSong, false, [this] { toPlayhead_.triggerClick(); });
+            menu.addItem (TRANS ("Follow the playhead"), true, follow_, [this] { followToggle_.triggerClick(); });
             menu.addSeparator();
             juce::PopupMenu themes;
             themes.addItem (TRANS ("Dark"), true, ! light_, [this] { if (intents_.themeChanged) intents_.themeChanged (false); });

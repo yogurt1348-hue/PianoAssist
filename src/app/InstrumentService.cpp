@@ -608,6 +608,14 @@ std::vector<int> InstrumentService::partSoundIds() const
     return ids;
 }
 
+std::vector<bool> InstrumentService::partHasEditor() const
+{
+    std::vector<bool> has;
+    for (const auto& slot : parts_)
+        has.push_back (slot.ownsHandle && slot.choice.kind == "plugin");
+    return has;
+}
+
 std::vector<InstrumentService::TrackSound> InstrumentService::trackSounds() const
 {
     std::vector<TrackSound> sounds;

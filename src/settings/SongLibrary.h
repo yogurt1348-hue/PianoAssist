@@ -16,8 +16,9 @@ struct TrackState
 {
     int track = 0;           ///< SMF track index, to check the saved list still matches the file
     int channel = 0;         ///< 0-based MIDI channel
-    int assignment = -1;     ///< 0 right, 1 left, 2 both split, 3 other track; -1 = as guessed from the file
+    int assignment = -1;     ///< 0 right, 1 left, 2 both split, 3 accompaniment, 4 excluded; -1 = as guessed from the file
     bool muted = false;
+    bool solo = false;
     double volume = 1.0;     ///< 0-1, scales the track's note velocities
     SoundSettings sound;     ///< kind "main" = the global main sound
     std::string stateFile;   ///< VST3 state file inside the song folder, relative; empty when none

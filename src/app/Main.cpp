@@ -16,6 +16,7 @@
 #include "ui/AppLookAndFeel.h"
 #include "ui/MainComponent.h"
 #include "ui/LibraryComponent.h"
+#include "ui/TracksComponent.h"
 #include "ui/SettingsComponent.h"
 #include "ui/Translations.h"
 
@@ -207,6 +208,36 @@ public:
     void closeButtonPressed() override { setVisible (false); }
 };
 
+/** The tracks window: resizable, can be maximised, stays open while
+    playing; it hides on close and reports where it is so it can be restored. */
+class TracksWindow final : public juce::DocumentWindow
+{
+public:
+    TracksWindow (const juce::String& name, juce::Component* content, std::function<void (juce::Rectangle<int>)> moved)
+        : DocumentWindow (name, ui::theme::window, DocumentWindow::allButtons), moved_ (std::move (moved))
+    {
+        setUsingNativeTitleBar (true);
+        setContentOwned (content, true);
+        setResizable (true, false);
+        setResizeLimits (720, 420, 6000, 4000);
+    }
+    void closeButtonPressed() override { setVisible (false); }
+    void moved() override { report(); }
+    void resized() override
+    {
+        DocumentWindow::resized();
+        report();
+    }
+
+private:
+    void report()
+    {
+        if (moved_ && isVisible() && ! isFullScreen() && ! isMinimised())
+            moved_ (getBounds());
+    }
+    std::function<void (juce::Rectangle<int>)> moved_;
+};
+
 /** Shown in a tool window: a read-only text. */
 class TextPage final : public juce::Component
 {
@@ -277,6 +308,8 @@ public:
         helpWindow_.reset();
         libraryWindow_.reset();
         library_ui_ = nullptr;
+        tracksWindow_.reset();
+        tracks_ui_ = nullptr;
         lesson_.reset();
         if (instruments_ != nullptr)
             instruments_->saveState();
@@ -396,6 +429,7 @@ private:
         content->setAppearance (settings_.appearance.theme == "light", settings_.appearance.uiScale);
         content->setTempo (static_cast<int> (std::lround (settings_.practice.tempoPercent)));
         content->setRecentFiles (settings_.recentFiles);
+        content->setLayoutChoices (settings_.visual.sidebarWidth, settings_.visual.sidebarCollapsed, settings_.visual.followPlayhead);
         midi_->setViewListener ([this] (const ui::InputMonitorView& view) {
             lastInputView_ = view;
             content_->setInputMonitor (view);
@@ -421,7 +455,7 @@ private:
         instruments_ = std::make_unique<InstrumentService> (*log_, *audio_, settings_.sound, [this] { saveSettings(); });
         instruments_->onChange = [this] { showSound(); };
         instruments_->onTrackSoundsChanged = [this] {
-            content_->setPartSounds (instruments_->partSoundIds());
+            refreshTracks();
             scheduleSongSave();
         };
         instruments_->restore();
@@ -522,26 +556,15 @@ private:
             lesson_->setCountIn (on);
             saveSettings();
         };
-        i.partAssignmentChanged = [this] (std::size_t part, int assignment) {
-            reassignPart (part, assignment);
-            scheduleSongSave();
+        i.showTracksWindow = [this] { showTracksWindow(); };
+        i.sidebarChanged = [this] (int width, bool collapsed) {
+            settings_.visual.sidebarWidth = width;
+            settings_.visual.sidebarCollapsed = collapsed;
+            saveSettings();
         };
-        i.partMuteChanged = [this] (std::size_t part, bool muted) {
-            if (song_ == nullptr || part >= song_->parts.size())
-                return;
-            mutedParts_.resize (song_->parts.size(), false);
-            mutedParts_[part] = muted;
-            log_->write (LogLevel::info, "ui", muted ? "Track muted" : "Track unmuted", { { "part", std::to_string (part + 1) } });
-            lesson_->setMutedParts (mutedParts_);
-            scheduleSongSave();
-        };
-        i.partVolumeChanged = [this] (std::size_t part, double volume) {
-            if (song_ == nullptr || part >= song_->parts.size())
-                return;
-            partVolumes_.resize (song_->parts.size(), 1.0);
-            partVolumes_[part] = std::clamp (volume, 0.0, 1.0);
-            lesson_->setPartGains (partVolumes_);
-            scheduleSongSave();
+        i.followChanged = [this] (bool follow) {
+            settings_.visual.followPlayhead = follow;
+            saveSettings();
         };
         i.openSongFolder = [this] {
             if (! songFolder_.empty())
@@ -550,7 +573,6 @@ private:
         i.openLibraryFolder = [this] { openFolder (libraryRoot (settings_.library.root), "library"); };
         i.showLibrary = [this] { showLibrary(); };
         i.checkForUpdates = [this] { checkForUpdates(); };
-        i.partSoundChanged = [this] (std::size_t part, int soundId) { instruments_->choosePart (part, soundId); };
         i.keyClicked = [this] (std::uint8_t pitch, bool down) { lesson_->previewKey (pitch, down); };
         i.soundChosen = [this] (int id) { instruments_->chooseMain (id); };
         i.showInstrumentWindow = [this] { instruments_->showEditor(); };
@@ -673,6 +695,8 @@ private:
         content_->setSound (view);
         if (settings_ui_ != nullptr)
             settings_ui_->setSound (view);
+        if (tracks_ui_ != nullptr)
+            tracks_ui_->setSound (view);
     }
 
     void setTheme (bool light)
@@ -801,6 +825,134 @@ private:
         });
     }
 
+    // --- tracks window ---------------------------------------------------------------------------
+
+    /** What is silent: muted tracks, and with any solo, every track that is not solo. */
+    std::vector<bool> heardMutes() const
+    {
+        auto silent = mutedParts_;
+        const bool anySolo = std::find (soloParts_.begin(), soloParts_.end(), true) != soloParts_.end();
+        silent.resize (std::max (silent.size(), soloParts_.size()), false);
+        if (anySolo)
+            for (std::size_t i = 0; i < silent.size(); ++i)
+                silent[i] = silent[i] || ! (i < soloParts_.size() && soloParts_[i]);
+        return silent;
+    }
+
+    void refreshTracks()
+    {
+        std::vector<ui::TrackRowView> rows;
+        if (song_ != nullptr)
+        {
+            const auto view = makePianoRollView (*song_, songTitle_);
+            const auto sounds = instruments_->partSoundIds();
+            const auto editors = instruments_->partHasEditor();
+            for (std::size_t i = 0; i < view.parts.size(); ++i)
+            {
+                const auto& p = view.parts[i];
+                ui::TrackRowView r;
+                r.label = p.label;
+                r.trackName = p.trackName;
+                r.instrument = p.instrument;
+                r.detail = p.detail;
+                r.track = p.track;
+                r.channel = p.channel;
+                r.assignment = p.assignment;
+                r.guessed = p.guessedFromPitch;
+                r.soundId = i < sounds.size() ? sounds[i] : 0;
+                r.volume = i < partVolumes_.size() ? partVolumes_[i] : 1.0;
+                r.muted = i < mutedParts_.size() && mutedParts_[i];
+                r.solo = i < soloParts_.size() && soloParts_[i];
+                r.hasEditor = i < editors.size() && editors[i];
+                rows.push_back (std::move (r));
+            }
+        }
+        content_->setTracks (rows);
+        if (tracks_ui_ != nullptr)
+            tracks_ui_->setRows (std::move (rows));
+    }
+
+    void setPartFlag (std::vector<bool>& flags, std::size_t part, bool on, const char* what)
+    {
+        if (song_ == nullptr || part >= song_->parts.size())
+            return;
+        flags.resize (song_->parts.size(), false);
+        flags[part] = on;
+        log_->write (LogLevel::info, "ui", what, { { "part", std::to_string (part + 1) }, { "on", on ? "yes" : "no" } });
+        lesson_->setMutedParts (heardMutes());
+        refreshTracks();
+        scheduleSongSave();
+    }
+
+    void showTracksWindow()
+    {
+        if (tracksWindow_ == nullptr)
+        {
+            ui::TracksComponent::Intents i;
+            i.assignmentChanged = [this] (std::size_t part, int assignment) {
+                reassignPart (part, assignment);
+                scheduleSongSave();
+            };
+            i.soundChanged = [this] (std::size_t part, int soundId) { instruments_->choosePart (part, soundId); };
+            i.volumeChanged = [this] (std::size_t part, double volume) {
+                if (song_ == nullptr || part >= song_->parts.size())
+                    return;
+                partVolumes_.resize (song_->parts.size(), 1.0);
+                partVolumes_[part] = std::clamp (volume, 0.0, 1.0);
+                lesson_->setPartGains (partVolumes_);
+                scheduleSongSave();
+            };
+            i.muteChanged = [this] (std::size_t part, bool on) { setPartFlag (mutedParts_, part, on, "Track mute"); };
+            i.soloChanged = [this] (std::size_t part, bool on) { setPartFlag (soloParts_, part, on, "Track solo"); };
+            i.openEditor = [this] (std::size_t part) { instruments_->showEditor (static_cast<int> (part)); };
+            i.openMainEditor = [this] { instruments_->showEditor(); };
+            i.openSoundSettings = [this] { openSettings (ui::SettingsPage::sounds); };
+            i.columnsChanged = [this] (const std::string& columns) {
+                settings_.visual.tracksColumns = columns;
+                scheduleSettingsSave();
+            };
+            tracks_ui_ = new ui::TracksComponent (std::move (i));
+            tracks_ui_->restoreColumns (settings_.visual.tracksColumns);
+            tracks_ui_->setSound (instruments_->view());
+            tracksWindow_ = std::make_unique<TracksWindow> (TRANS ("Tracks and instruments"), tracks_ui_, [this] (juce::Rectangle<int> b) {
+                settings_.visual.tracksWindow = (juce::String (b.getX()) + " " + juce::String (b.getY()) + " " + juce::String (b.getWidth())
+                                                 + " " + juce::String (b.getHeight())).toStdString();
+                scheduleSettingsSave();
+            });
+            placeTracksWindow();
+        }
+        refreshTracks();
+        tracksWindow_->setVisible (true);
+        tracksWindow_->toFront (true);
+        log_->write (LogLevel::info, "ui", "Tracks window opened");
+    }
+
+    /** Restores the saved place, but only where a screen can show it now. */
+    void placeTracksWindow()
+    {
+        const auto parts = juce::StringArray::fromTokens (toJuce (settings_.visual.tracksWindow), " ", {});
+        if (parts.size() == 4)
+        {
+            const juce::Rectangle<int> saved (parts[0].getIntValue(), parts[1].getIntValue(), parts[2].getIntValue(), parts[3].getIntValue());
+            for (const auto& display : juce::Desktop::getInstance().getDisplays().displays)
+            {
+                const auto shown = display.userArea.getIntersection (saved);
+                if (shown.getWidth() >= 200 && shown.getHeight() >= 120)
+                {
+                    tracksWindow_->setBounds (saved.constrainedWithin (display.userArea));
+                    return;
+                }
+            }
+        }
+        tracksWindow_->centreAroundComponent (window_.get(), tracks_ui_->getWidth(), tracks_ui_->getHeight());
+    }
+
+    void scheduleSettingsSave()
+    {
+        // Moving a window reports many times; one write when it settles.
+        settingsSaveDueMs_ = juce::Time::getMillisecondCounterHiRes() + 1000.0;
+    }
+
     // --- song library window ---------------------------------------------------------------------
 
     void showLibrary()
@@ -922,6 +1074,7 @@ private:
     {
         std::filesystem::path folder;
         std::vector<std::string> notices;
+        juce::String toast;
         if (isLibrarySong (source))
             folder = source.parent_path();
         else
@@ -941,7 +1094,7 @@ private:
                 log_->write (LogLevel::info, "library", imported.value().reused ? "Song already in the library" : "Song imported",
                              { { "folder", fileNameForLog (folder) } });
                 if (! imported.value().reused)
-                    notices.push_back (TRANS ("Added to your song library as a copy; the original file is not changed.").toStdString());
+                    toast = TRANS ("Added to your song library as a copy; the original file is not changed.");
             }
         }
 
@@ -996,6 +1149,7 @@ private:
         applyManifest();
         rememberRecent (pathToUtf8 (midi));
         log_->write (LogLevel::info, "song", "Song shown in piano roll");
+        content_->showToast (toast);
         refreshLibrary();
     }
 
@@ -1010,7 +1164,7 @@ private:
         for (std::size_t i = 0; i < parts.size() && i < m.tracks.size(); ++i)
         {
             const auto& saved = m.tracks[i];
-            if (saved.track != parts[i].track || saved.channel != parts[i].channel || saved.assignment < 0 || saved.assignment > 3)
+            if (saved.track != parts[i].track || saved.channel != parts[i].channel || saved.assignment < 0 || saved.assignment > 4)
                 continue;
             const auto to = static_cast<timeline::Part::Assignment> (saved.assignment);
             if (song.parts[i].assignment == to && song.parts[i].setByUser)
@@ -1021,9 +1175,12 @@ private:
         song_ = std::make_shared<const timeline::Song> (std::move (song));
 
         mutedParts_.assign (parts.size(), false);
+        soloParts_.assign (parts.size(), false);
         partVolumes_.assign (parts.size(), 1.0);
         std::vector<int> channels;
         std::vector<InstrumentService::TrackSound> sounds (parts.size());
+        for (auto& sound : sounds)
+            sound.choice.kind = "main"; // tracks without a saved choice follow the main sound
         for (std::size_t i = 0; i < parts.size(); ++i)
         {
             channels.push_back (parts[i].channel);
@@ -1031,6 +1188,7 @@ private:
                 continue;
             const auto& saved = m.tracks[i];
             mutedParts_[i] = saved.muted;
+            soloParts_[i] = saved.solo;
             partVolumes_[i] = std::clamp (saved.volume, 0.0, 1.0);
             sounds[i].choice = saved.sound;
             if (! saved.stateFile.empty() && ! songFolder_.empty())
@@ -1057,7 +1215,7 @@ private:
         lesson_->setPractising (m.practice.waitForNotes);
         lesson_->setTempo (m.practice.tempoPercent / 100.0);
         lesson_->setProfile (settings_.practiceProfile);
-        lesson_->setMutedParts (mutedParts_);
+        lesson_->setMutedParts (heardMutes());
         lesson_->setPartGains (partVolumes_);
         lesson_->setLoop (m.loop.enabled, m.loop.startSeconds, m.loop.endSeconds);
         if (m.positionSeconds > 0.0 && m.positionSeconds < song_->durationSeconds)
@@ -1067,8 +1225,7 @@ private:
         showSongView();
         content_->setPixelsPerSecond (m.pixelsPerSecond);
         content_->setTempo (static_cast<int> (std::lround (m.practice.tempoPercent)));
-        content_->setTrackMix (mutedParts_, partVolumes_);
-        content_->setPartSounds (instruments_->partSoundIds());
+        refreshTracks();
         content_->setLoop (m.loop.enabled, m.loop.startSeconds, m.loop.endSeconds);
         refreshSettingsValues();
         saveSettings();
@@ -1095,8 +1252,10 @@ private:
         songFolder_.clear();
         manifest_ = {};
         mutedParts_.clear();
+        soloParts_.clear();
         partVolumes_.clear();
         content_->setSong (nullptr);
+        refreshTracks();
         content_->setRecentFiles (settings_.recentFiles);
     }
 
@@ -1135,6 +1294,7 @@ private:
             t.channel = parts[i].channel;
             t.assignment = parts[i].setByUser ? static_cast<int> (parts[i].assignment) : -1;
             t.muted = i < mutedParts_.size() && mutedParts_[i];
+            t.solo = i < soloParts_.size() && soloParts_[i];
             t.volume = i < partVolumes_.size() ? partVolumes_[i] : 1.0;
             if (i < sounds.size())
             {
@@ -1302,7 +1462,7 @@ private:
 
     void reassignPart (std::size_t part, int assignment)
     {
-        if (song_ == nullptr || assignment < 0 || assignment > 3)
+        if (song_ == nullptr || assignment < 0 || assignment > 4)
             return;
         const auto to = static_cast<timeline::Part::Assignment> (assignment);
         auto mapped = timeline::reassignPart (*song_, part, to);
@@ -1317,7 +1477,10 @@ private:
                        { "to", timeline::toString (to) } });
         song_ = std::make_shared<const timeline::Song> (std::move (mapped).value());
         lesson_->loadSong (song_, true);
+        lesson_->setMutedParts (heardMutes());
+        lesson_->setPartGains (partVolumes_);
         showSongView();
+        refreshTracks();
     }
 
     // --- periodic ---------------------------------------------------------------------------
@@ -1329,6 +1492,11 @@ private:
 
         if (songSaveDueMs_ > 0.0 && juce::Time::getMillisecondCounterHiRes() >= songSaveDueMs_)
             saveSongNow();
+        if (settingsSaveDueMs_ > 0.0 && juce::Time::getMillisecondCounterHiRes() >= settingsSaveDueMs_)
+        {
+            settingsSaveDueMs_ = 0.0;
+            saveSettings();
+        }
 
         ui::TransportView view;
         using S = ui::TransportView::State;
@@ -1413,10 +1581,14 @@ private:
     std::shared_ptr<const timeline::Song> song_;
     std::string songTitle_;
     std::vector<std::string> songNotices_;
+    double settingsSaveDueMs_ = 0.0;
     std::filesystem::path songFolder_; ///< empty when the library is unavailable
     settings::SongManifest manifest_;
     std::vector<std::size_t> lastStateHashes_; ///< plug-in states already on disk
     double songSaveDueMs_ = 0.0;
+    std::vector<bool> soloParts_;     ///< tracks heard alone (with the other solo tracks)
+    std::unique_ptr<TracksWindow> tracksWindow_;
+    ui::TracksComponent* tracks_ui_ = nullptr; // owned by tracksWindow_
     std::vector<bool> mutedParts_;    ///< "Other tracks" the user switched off
     std::vector<double> partVolumes_; ///< per track, 0-1
 

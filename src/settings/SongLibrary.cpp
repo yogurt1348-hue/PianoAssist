@@ -133,7 +133,7 @@ std::string toJson (const SongManifest& m)
     json tracks = json::array();
     for (const auto& t : m.tracks)
         tracks.push_back ({ { "track", t.track }, { "channel", t.channel }, { "assignment", t.assignment }, { "muted", t.muted },
-                            { "volume", t.volume }, { "sound", soundJson (t.sound) }, { "stateFile", t.stateFile } });
+                            { "solo", t.solo }, { "volume", t.volume }, { "sound", soundJson (t.sound) }, { "stateFile", t.stateFile } });
     const json root {
         { "schemaVersion", SongManifest::currentSchemaVersion },
         { "id", m.id },
@@ -208,13 +208,15 @@ LoadedManifest manifestFromJson (std::string_view text)
             readValue (t, "channel", state.channel, warnings, "track");
             readValue (t, "assignment", state.assignment, warnings, "track");
             readValue (t, "muted", state.muted, warnings, "track");
+            if (t.contains ("solo"))
+                readValue (t, "solo", state.solo, warnings, "track");
             readValue (t, "volume", state.volume, warnings, "track");
             readValue (t, "stateFile", state.stateFile, warnings, "track");
             if (const auto sound = t.find ("sound"); sound != t.end())
                 readSound (*sound, state.sound, warnings, "track.sound");
             if (state.channel < 0 || state.channel > 15)
                 state.channel = 0;
-            if (state.assignment < -1 || state.assignment > 3)
+            if (state.assignment < -1 || state.assignment > 4)
                 state.assignment = -1;
             if (! finiteIn (state.volume, 0.0, 1.0))
                 state.volume = 1.0;

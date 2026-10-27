@@ -21,6 +21,7 @@ struct Part
         leftHand,
         splitAtMiddleC, ///< one piano part holding both hands
         backing,
+        excluded,       ///< neither checked nor played (a guide or duplicate track)
     };
 
     std::uint16_t track = 0;

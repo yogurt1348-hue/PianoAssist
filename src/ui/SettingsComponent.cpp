@@ -323,25 +323,25 @@ public:
                                         TRANS ("Normal: 250 ms early, 300 ms late (recommended)"),
                                         TRANS ("Easy: 400 ms early, 600 ms late") };
         for (int i = 0; i < 3; ++i)
-        {
-            auto& b = tolerance_[static_cast<std::size_t> (i)];
-            b.setButtonText (labels[i]);
-            b.setRadioGroupId (2001);
-            b.onClick = [this, i] {
-                if (tolerance_[static_cast<std::size_t> (i)].getToggleState() && intents_.toleranceChanged)
-                    intents_.toleranceChanged (i);
-            };
-            addAndMakeVisible (b);
-        }
-        addNote (toleranceNote_, TRANS ("A note played this much before or after its time still counts, and the song keeps "
-                                        "going. Each song remembers its own choice."));
+            tolerance_.addItem (labels[i], i + 1);
+        tolerance_.setTitle (TRANS ("Timing tolerance"));
+        tolerance_.onChange = [this] {
+            if (tolerance_.getSelectedId() > 0 && intents_.toleranceChanged)
+                intents_.toleranceChanged (tolerance_.getSelectedId() - 1);
+        };
+        addAndMakeVisible (tolerance_);
+        addNote (toleranceNote_, TRANS ("Three different things: the timing tolerance says how early or late a note may be played "
+                                        "and still count. The chord window: the notes of a chord may come one by one, within "
+                                        "1.5 s of the song's time; after that the chord starts over. And with waiting on, the "
+                                        "song waits for the right notes as long as it takes. Each song remembers its own tolerance."));
         addHeading (waitHeading_, TRANS ("Waiting"));
-        wait_.setButtonText (TRANS ("Wait for my notes when a new song is opened"));
+        wait_.setButtonText (TRANS ("Turn on waiting for notes for new songs"));
         wait_.onClick = [this] { if (intents_.waitForNotesChanged) intents_.waitForNotesChanged (wait_.getToggleState()); };
         addAndMakeVisible (wait_);
+        addNote (waitNote_, TRANS ("Saved songs use their own mode. The current mode is the \"Wait for my notes\" switch next to Play."));
         addHeading (handsHeading_, TRANS ("Hands"));
         addNote (handsNote_, TRANS ("Which part is the right or left hand is guessed from the file. Parts marked ? were guessed "
-                                    "from pitch. Change them in the side panel under Tracks and instruments; each song "
+                                    "from pitch. Change them in the Tracks and instruments window; each song "
                                     "remembers its own choices."));
         addHeading (libraryHeading_, TRANS ("Song library"));
         library_.setFont (juce::FontOptions (14.0f));
@@ -358,8 +358,7 @@ public:
 
     void setValues (const Values& v)
     {
-        for (int i = 0; i < 3; ++i)
-            tolerance_[static_cast<std::size_t> (i)].setToggleState (v.tolerance == i, juce::dontSendNotification);
+        tolerance_.setSelectedId (v.tolerance + 1, juce::dontSendNotification);
         wait_.setToggleState (v.waitForNotes, juce::dontSendNotification);
         library_.setText (toJuce (v.libraryFolder), juce::dontSendNotification);
         library_.setTooltip (toJuce (v.libraryFolder));
@@ -369,11 +368,11 @@ public:
     {
         Rows r { getLocalBounds().reduced (20, 16) };
         toleranceHeading_.setBounds (r.take (26, 4));
-        for (auto& b : tolerance_)
-            b.setBounds (r.take (26, 2));
-        toleranceNote_.setBounds (r.take (40, 12));
+        tolerance_.setBounds (r.take (30, 6).withWidth (420));
+        toleranceNote_.setBounds (r.take (78, 12));
         waitHeading_.setBounds (r.take (26, 4));
-        wait_.setBounds (r.take (26, 12));
+        wait_.setBounds (r.take (26, 2));
+        waitNote_.setBounds (r.take (22, 12));
         handsHeading_.setBounds (r.take (26, 4));
         handsNote_.setBounds (r.take (54, 12));
         libraryHeading_.setBounds (r.take (26, 4));
@@ -388,8 +387,8 @@ public:
 
 private:
     Intents& intents_;
-    juce::Label toleranceHeading_, toleranceNote_, waitHeading_, handsHeading_, handsNote_, libraryHeading_, library_, libraryNote_;
-    std::array<juce::ToggleButton, 3> tolerance_;
+    juce::Label toleranceHeading_, toleranceNote_, waitHeading_, waitNote_, handsHeading_, handsNote_, libraryHeading_, library_, libraryNote_;
+    juce::ComboBox tolerance_;
     juce::ToggleButton wait_;
     juce::TextButton changeLibrary_, openLibrary_;
 };

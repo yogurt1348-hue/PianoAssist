@@ -31,6 +31,11 @@ struct VisualPreferences
 {
     double pixelsPerSecond = 120.0;
     bool showNoteNames = true;
+    bool followPlayhead = true;     ///< the roll scrolls with the playhead (view only)
+    int sidebarWidth = 300;         ///< side panel width in logical pixels
+    bool sidebarCollapsed = false;
+    std::string tracksWindow;       ///< "x y w h" of the tracks window, empty = centred
+    std::string tracksColumns;      ///< column layout of the tracks window (JUCE header state)
 
     friend bool operator== (const VisualPreferences&, const VisualPreferences&) = default;
 };

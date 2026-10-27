@@ -61,6 +61,7 @@ public:
     void setSong (std::vector<int> channels, std::vector<TrackSound> sounds);
     void choosePart (std::size_t part, int soundId); ///< 0 = main sound
     std::vector<int> partSoundIds() const;           ///< for the tracks list, 0 = main
+    std::vector<bool> partHasEditor() const;         ///< tracks with their own plug-in window
     /** Current choices and plug-in states, for the song library. */
     std::vector<TrackSound> trackSounds() const;
 

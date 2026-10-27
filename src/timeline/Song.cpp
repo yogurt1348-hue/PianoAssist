@@ -67,6 +67,7 @@ NoteRole roleFor (const Part& part, std::uint8_t pitch) noexcept
         case Part::Assignment::leftHand:       return NoteRole::leftHand;
         case Part::Assignment::backing:        return NoteRole::backing;
         case Part::Assignment::splitAtMiddleC: return pitch < handSplitPitch ? NoteRole::leftHand : NoteRole::rightHand;
+        case Part::Assignment::excluded:       return NoteRole::unknown;
     }
     return NoteRole::backing;
 }
@@ -80,6 +81,7 @@ const char* toString (Part::Assignment assignment) noexcept
         case Part::Assignment::leftHand:       return "left hand";
         case Part::Assignment::splitAtMiddleC: return "both hands (split at C4)";
         case Part::Assignment::backing:        return "backing";
+        case Part::Assignment::excluded:       return "excluded";
     }
     return "backing";
 }

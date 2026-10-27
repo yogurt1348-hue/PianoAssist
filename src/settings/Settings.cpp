@@ -4,6 +4,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+
 #include <cmath>
 #include <functional>
 #include <map>
@@ -119,7 +121,10 @@ std::string toJson (const Settings& s)
             { "onsetLateMs", s.practiceProfile.onsetLateMs },
             { "ignoreVelocity", s.practiceProfile.ignoreVelocity },
             { "requireExactPitch", s.practiceProfile.requireExactPitch } } },
-        { "visual", { { "pixelsPerSecond", s.visual.pixelsPerSecond }, { "showNoteNames", s.visual.showNoteNames } } },
+        { "visual", { { "pixelsPerSecond", s.visual.pixelsPerSecond }, { "showNoteNames", s.visual.showNoteNames },
+                      { "followPlayhead", s.visual.followPlayhead }, { "sidebarWidth", s.visual.sidebarWidth },
+                      { "sidebarCollapsed", s.visual.sidebarCollapsed }, { "tracksWindow", s.visual.tracksWindow },
+                      { "tracksColumns", s.visual.tracksColumns } } },
         { "calibration", { { "inputOffsetMs", s.calibration.inputOffsetMs } } },
         { "sound",
           { { "kind", s.sound.kind },
@@ -192,6 +197,11 @@ LoadResult fromJson (std::string_view text)
     reader.read ("visual", "pixelsPerSecond", s.visual.pixelsPerSecond,
                  [] (const double& v) { return finiteIn (v, 10.0, 2000.0); });
     reader.read ("visual", "showNoteNames", s.visual.showNoteNames);
+    reader.read ("visual", "followPlayhead", s.visual.followPlayhead);
+    reader.read ("visual", "sidebarWidth", s.visual.sidebarWidth, [] (const int& v) { return v >= 200 && v <= 1200; });
+    reader.read ("visual", "sidebarCollapsed", s.visual.sidebarCollapsed);
+    reader.read ("visual", "tracksWindow", s.visual.tracksWindow, [] (const std::string& v) { return v.size() <= 64; });
+    reader.read ("visual", "tracksColumns", s.visual.tracksColumns, [] (const std::string& v) { return v.size() <= 2048; });
 
     const auto maxOffset = lesson::InputCalibration::maxAbsOffsetMs;
     reader.read ("calibration", "inputOffsetMs", s.calibration.inputOffsetMs,

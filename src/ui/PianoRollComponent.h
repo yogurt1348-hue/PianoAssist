@@ -23,8 +23,19 @@ public:
     void setHeldInputPitches (std::vector<std::uint8_t> pitches);
     void setPixelsPerSecond (double pixelsPerSecond);
     double pixelsPerSecond() const noexcept { return pixelsPerSecond_; }
-    /** Moves the playhead; when following, pages the view to keep it visible. */
+    /** Moves the playhead; when following, pages the view to keep it visible.
+        After the user scrolls by hand the view stays put until goToPlayhead(). */
     void setPlayhead (double seconds, bool follow);
+    /** Zooms by factor, keeping the playhead (or the middle of the view when
+        the playhead is off screen) at the same place. */
+    void zoomBy (double factor);
+    /** Fits the whole song into the view. */
+    void showWholeSong();
+    /** Brings the playhead into view and resumes following it. */
+    void goToPlayhead();
+    bool userScrolled() const noexcept { return userScrolled_; }
+    /** The user scrolled away from the playhead (true) or came back (false). */
+    std::function<void (bool scrolledAway)> onUserScrolledChanged;
 
     std::function<void (double pixelsPerSecond)> onZoomChanged;
     std::function<void (double seconds)> onSeekRequested;
@@ -57,6 +68,9 @@ private:
     std::vector<std::uint8_t> heldInput_;
     double pixelsPerSecond_ = 120.0;
     double viewStartSeconds_ = 0.0;
+    bool userScrolled_ = false;
+    void setUserScrolled (bool scrolled);
+    void zoomAround (double newPixelsPerSecond, double anchorSeconds);
     double playheadSeconds_ = 0.0;
     bool loopEnabled_ = false;
     double loopStart_ = 0.0, loopEnd_ = 0.0;

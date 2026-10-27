@@ -38,6 +38,9 @@ struct PianoRollView
         bool guessedFromPitch = false; ///< show a "please check" mark
         std::string instrument;        ///< General MIDI name, e.g. "Acoustic Bass"
         std::size_t noteCount = 0;
+        std::string trackName;         ///< as in the file, may be empty
+        int track = 0;                 ///< 1-based
+        int channel = 1;               ///< 1-based MIDI channel
     };
 
     std::string title;              ///< file name

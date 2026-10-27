@@ -150,7 +150,7 @@ TEST_CASE ("Song settings round-trip and stay separate per song")
     bass.volume = 0.5;
     bass.sound = { "plugin", "VST3-Bass-123", "Bass", "", {} };
     bass.stateFile = "plugin-state/track-3.bin";
-    m.tracks = { TrackState { 0, 0, 0, false, 1.0, { "main", "", "", "", {} }, "" }, bass };
+    m.tracks = { TrackState { 0, 0, 0, false, true, 1.0, { "main", "", "", "", {} }, "" }, bass };
     m.practice.mode = lesson::PracticeMode::leftHand;
     m.practice.waitForNotes = true;
     m.practice.tempoPercent = 70.0;

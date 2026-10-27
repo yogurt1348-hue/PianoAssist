@@ -222,7 +222,7 @@ void PianoRollComponent::setPlayhead (double seconds, bool follow)
     if (std::abs (seconds - playheadSeconds_) < 1.0e-4 && ! follow)
         return;
     playheadSeconds_ = seconds;
-    if (follow)
+    if (follow && ! userScrolled_)
     {
         const double visible = rollArea().getWidth() / pixelsPerSecond_;
         if (seconds < viewStartSeconds_ || seconds > viewStartSeconds_ + visible * 0.8)
@@ -301,6 +301,7 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
         return; // moving A or B, anywhere along the edge
     if (e.position.y < static_cast<float> (rulerHeight))
         return; // the ruler: a click seeks on mouse up, a drag selects a loop
+    setUserScrolled (false); // the playhead goes where the user looks
     if (onSeekRequested)
         onSeekRequested (dragAnchor_);
 }
@@ -348,7 +349,10 @@ void PianoRollComponent::mouseUp (const juce::MouseEvent& e)
         return;
     }
     if (onSeekRequested && rollArea().withTop (0).contains (e.getPosition()))
-        onSeekRequested (barAtOrBefore (dragAnchor_)); // a click on the bar numbers starts at that bar
+    {
+        setUserScrolled (false);
+        onSeekRequested (barAtOrBefore (dragAnchor_));
+    } // a click on the bar numbers starts at that bar
 }
 
 void PianoRollComponent::resized()
@@ -368,6 +372,58 @@ void PianoRollComponent::updateScrollBar()
 void PianoRollComponent::scrollBarMoved (juce::ScrollBar*, double newRangeStart)
 {
     viewStartSeconds_ = std::max (0.0, newRangeStart);
+    setUserScrolled (true);
+    repaint();
+}
+
+void PianoRollComponent::setUserScrolled (bool scrolled)
+{
+    if (userScrolled_ == scrolled)
+        return;
+    userScrolled_ = scrolled;
+    if (onUserScrolledChanged)
+        onUserScrolledChanged (scrolled);
+}
+
+void PianoRollComponent::zoomAround (double newPixelsPerSecond, double anchorSeconds)
+{
+    newPixelsPerSecond = std::clamp (newPixelsPerSecond, minPixelsPerSecond, maxPixelsPerSecond);
+    const double anchorX = (anchorSeconds - viewStartSeconds_) * pixelsPerSecond_;
+    pixelsPerSecond_ = newPixelsPerSecond;
+    viewStartSeconds_ = std::max (0.0, anchorSeconds - anchorX / pixelsPerSecond_);
+    updateScrollBar();
+    repaint();
+    if (onZoomChanged)
+        onZoomChanged (pixelsPerSecond_);
+}
+
+void PianoRollComponent::zoomBy (double factor)
+{
+    const double visible = rollArea().getWidth() / pixelsPerSecond_;
+    const bool playheadShown = playheadSeconds_ >= viewStartSeconds_ && playheadSeconds_ <= viewStartSeconds_ + visible;
+    zoomAround (pixelsPerSecond_ * factor, playheadShown ? playheadSeconds_ : viewStartSeconds_ + visible * 0.5);
+}
+
+void PianoRollComponent::showWholeSong()
+{
+    if (view_ == nullptr || rollArea().getWidth() <= 0)
+        return;
+    const double duration = std::max (1.0, view_->durationSeconds);
+    pixelsPerSecond_ = std::clamp (rollArea().getWidth() / duration, minPixelsPerSecond, maxPixelsPerSecond);
+    viewStartSeconds_ = 0.0;
+    setUserScrolled (playheadSeconds_ > rollArea().getWidth() / pixelsPerSecond_); // whole song may still not fit
+    updateScrollBar();
+    repaint();
+    if (onZoomChanged)
+        onZoomChanged (pixelsPerSecond_);
+}
+
+void PianoRollComponent::goToPlayhead()
+{
+    const double visible = rollArea().getWidth() / pixelsPerSecond_;
+    viewStartSeconds_ = std::max (0.0, playheadSeconds_ - visible * 0.2);
+    setUserScrolled (false);
+    updateScrollBar();
     repaint();
 }
 
@@ -388,6 +444,7 @@ void PianoRollComponent::mouseWheelMove (const juce::MouseEvent& e, const juce::
     {
         const double visible = rollArea().getWidth() / pixelsPerSecond_;
         viewStartSeconds_ = std::max (0.0, viewStartSeconds_ - delta * visible * 0.25);
+        setUserScrolled (true);
     }
     updateScrollBar();
     repaint();
