@@ -1,103 +1,82 @@
-# Cadenza
+# PianoAssist
 
-[![Windows build](https://github.com/Piskocis/Cadenza/actions/workflows/windows.yml/badge.svg)](https://github.com/Piskocis/Cadenza/actions/workflows/windows.yml)
+A Windows practice player for a USB MIDI piano (validated on a Casio CDP-S110). Load a local MIDI file, watch the notes on a piano roll, hear the accompaniment, and move forward only when you play the required notes.
 
-**A free, open-source software arranger workstation for Windows.**
+The product brief and phase plan live in [`docs/plan/`](docs/plan/README.md). Implementation decisions are logged at the end of [`docs/plan/12-assumptions-open-questions.md`](docs/plan/12-assumptions-open-questions.md).
 
-Play chords with your left hand and Cadenza plays a full backing band — drums, bass,
-chords, and more — in real time, following your chords. Play a melody on top. It's the
-software equivalent of a hardware "arranger keyboard," built with JUCE and C++.
+## Status
 
-> Status: actively developed, builds and runs on Windows. Contributors welcome —
-> **especially musicians who know music theory** (see [Contributing](#contributing)).
+Version 0.2.0, test builds. Implemented and covered by automated tests: USB MIDI input with reconnect, MIDI playback with built-in synth, SoundFont and VST3 sounds per track, note-gated practice with hand modes, A–B practice ranges with loop and count-in, tempo 25–200%, a song library that keeps a copy and the settings of each song, settings window, Russian and English UI, installer and portable builds, update check.
 
-![Cadenza arranger — main view](screenshots/cadenza-main.png)
+Hardware behaviour on the Casio is checked by hand: [`docs/manual-checks/casio-checklist.md`](docs/manual-checks/casio-checklist.md).
 
----
+| Document | What it covers |
+| --- | --- |
+| [`docs/practice-rules.md`](docs/practice-rules.md) | How notes, chords, loops, seeks and count-in behave |
+| [`docs/data-and-updates.md`](docs/data-and-updates.md) | Where data is kept, the song library, updating, versions |
+| [`docs/windows-warnings.md`](docs/windows-warnings.md) | SmartScreen and Defender, checking SHA-256, signing |
+| [`docs/sounds.md`](docs/sounds.md) | Sounds, free SoundFonts and VST3 instruments |
+| [`docs/known-limitations.md`](docs/known-limitations.md) | Known limitations |
 
-## What it does
+## Requirements
 
-- 🎹 **Live auto-accompaniment** — play chords, hear a styled backing band that
-  transposes to follow you in real time.
-- 🎛️ **Arranger sections** — Intro / Main A–D / Fills / Ending, with transition fills,
-  One Touch Settings, registrations, and a mixer.
-- 🎼 **Style editor** — a full piano-roll editor (zoom, undo/redo, velocity lane,
-  drag-to-duplicate, live tooltips) for authoring/tweaking native `.cstyle` styles.
-- 🎵 **MIDI → Style converter** — import any General-MIDI `.mid` file and turn it into a
-  playable, chord-transposable style:
-  - **Auto-split** detects sections (Main A/B, Intro, Ending) from the song,
-  - **preview** lets you audition sections by ear before converting,
-  - **"Play in C"** normalizes a style so you can play it on easy white keys and use
-    Transpose to reach the real key,
-  - one-chord-per-section detection keeps imported styles in key.
-- 🤖 **AI assist (optional, bring-your-own Anthropic API key)** — generate fills /
-  intros / endings and "polish" a style's notes, using the Claude API. Fully opt-in.
-- 🔊 **General-MIDI playback** via FluidSynth + a SoundFont; loads Yamaha `.sty/.prs`
-  styles and the native JSON-based `.cstyle` format.
+| What | Version |
+| --- | --- |
+| OS | Windows 10/11 x64 |
+| Compiler | Visual Studio 2022 (MSVC v143), C++20 |
+| CMake | 3.25 or newer |
+| Git | any recent version (dependencies are fetched at configure time) |
 
----
+## Build and test on Windows
 
-## Screenshots
-
-**Import any MIDI → a playable, chord-following style** — Cadenza auto-detects the
-chord, auto-splits the song into sections, normalizes to C for easy white-key play,
-and can generate fills with AI:
-
-![Import MIDI as Style](screenshots/cadenza-import.png)
-
-**Style page** — sections (Main A–D, fills, ending), the per-part mixer, and the
-AI assist actions (Add Fills / Polish):
-
-![Style page](screenshots/cadenza-style.png)
-
----
-
-## Build (Windows)
-
-Requirements: **Visual Studio 2022/2026 (MSVC)**, **CMake**, **Ninja**, and **JUCE**
-(cloned into `lib/JUCE`). FluidSynth is provided via vcpkg.
+From a "Developer PowerShell for VS 2022" in the repository root:
 
 ```powershell
-# Clone JUCE into lib/ (not committed to this repo)
-git clone https://github.com/juce-framework/JUCE.git lib/JUCE
-
-# Configure + build (from a Visual Studio Developer shell, or after vcvars64)
-cmake -S . -B build-msvc -G Ninja
-cmake --build build-msvc
-ctest --test-dir build-msvc --output-on-failure
+cmake --preset windows-x64
+cmake --build --preset windows-x64-debug
+ctest --preset windows-x64-debug
 ```
 
-Output: `build-msvc/Cadenza_artefacts/Debug/Cadenza Workstation.exe`.
+Use `windows-x64-release` for the release configuration. The app is written to `build\windows-x64\src\app\PianoAssistApp_artefacts\<Config>\PianoAssist.exe`.
 
-A **SoundFont** is required for sound — drop a GM `.sf2` into `resources/sf2/`
-(e.g. the freely-redistributable *GeneralUser GS*). Cadenza loads the one you
-select, or the largest it finds there.
+## Tests without JUCE (any OS)
 
----
+The domain libraries do not depend on JUCE, so the tests run anywhere with CMake, Ninja and a C++20 compiler:
 
-## Contributing
+```sh
+cmake --preset tests-only
+cmake --build --preset tests-only
+ctest --preset tests-only
+```
 
-Contributions are very welcome — code, bug reports, and especially **music-theory
-expertise**. The hardest and most valuable open problems are musical:
+No MIDI keyboard or audio device is needed for the automated tests.
 
-- chord voicing / voice-leading when transposing a style to the played chord,
-- Yamaha NTR/NTT transposition fidelity and color/scale-tone handling,
-- drum-fill and section-flow musicality.
+## Where the app keeps its files
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for build/PR details and the contributor
-agreement. Good first issues will be tagged in the issue tracker.
+| File | Location on Windows |
+| --- | --- |
+| Settings | `%APPDATA%\PianoAssist\settings.json` (portable: `Data\settings.json` next to the exe) |
+| Logs | `%APPDATA%\PianoAssist\logs\pianoassist.log` (JSON lines, rotated at 5 MiB, 5 archives kept) |
+| Song library | `%APPDATA%\PianoAssist\Songs` (or the folder chosen in Settings) |
 
----
+Logs record every startup step, the app and Windows versions, MIDI devices appearing and disappearing, every note and pedal event, user actions, errors and crashes with a stack trace. They do not record the paths or contents of your music files. "Open log folder" in the app opens this folder.
 
-## License
+## Layout
 
-Cadenza is licensed under the **GNU General Public License v3.0** — see
-[LICENSE](LICENSE). You're free to use, study, modify, and share it; derivative
-works must also be GPLv3 and retain attribution.
+| Folder | Module |
+| --- | --- |
+| `src/core` | UTF-8 paths, bounded file reading, `Result` |
+| `src/smf` | Standard MIDI File parser (format 0/1), tempo map |
+| `src/timeline` | Immutable normalized note model, song builder, hand-role inference |
+| `src/transport` | Transport states (state machine arrives in phase 3) |
+| `src/lesson_engine` | Practice profile and calibration (gate engine arrives in phase 3) |
+| `src/midi_io` | Input normalization, monitor state, device selection (JUCE adapter in `src/app`) |
+| `src/audio` | `IInstrumentRenderer` seam, sample-accurate playback engine, built-in synth (JUCE) |
+| `src/settings` | Versioned settings schema with safe fallback |
+| `src/diagnostics` | Rotating structured log, session report |
+| `src/ui`, `src/app` | JUCE window and startup wiring |
+| `tests` | Catch2 tests and MIDI fixtures (`tools/make_fixtures.py` regenerates them) |
 
-**Commercial licensing:** the project is © its author (Cadenza). If you want to use
-Cadenza in a **closed-source or commercial** product, that's not permitted under the
-GPL — please contact **suko5rp2@gmail.com** to discuss a commercial license.
+## Dependencies
 
-Built on **JUCE** (used under its GPLv3 option) and **FluidSynth** (LGPL). See
-[NOTICE](NOTICE) for third-party acknowledgements.
+Pinned in [`cmake/Dependencies.cmake`](cmake/Dependencies.cmake): JUCE 8.0.8 (AGPLv3 or commercial), nlohmann/json 3.11.3 (MIT), Catch2 3.7.1 (BSL-1.0, tests only).

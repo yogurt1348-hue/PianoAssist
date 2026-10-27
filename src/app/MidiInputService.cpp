@@ -1,0 +1,443 @@
+#include "app/MidiInputService.h"
+#include "app/CrashReport.h"
+
+#include "core/NoteName.h"
+#include "midi_io/MidiNormalizer.h"
+
+#include <algorithm>
+#include <cstdio>
+
+namespace pianoassist::app
+{
+namespace
+{
+/** Translated status text; %1 is replaced by the device name. */
+std::string tr (const char* text, const std::string& name = {})
+{
+    return TRANS (text).replace ("%1", juce::String::fromUTF8 (name.c_str())).toStdString();
+}
+} // namespace
+
+namespace
+{
+using diagnostics::LogLevel;
+using midi_io::InputEventType;
+
+constexpr int drainIntervalMs = 15;
+constexpr int rescanEveryTicks = 1000 / drainIntervalMs; // about once per second
+constexpr std::int64_t otherMessageLogIntervalMicros = 5'000'000;
+
+std::string describe (const midi_io::MidiDeviceInfo& device)
+{
+    return device.name + " [" + device.identifier + "]";
+}
+} // namespace
+
+MidiInputService::MidiInputService (diagnostics::RotatingLog& log, Remembered remembered)
+    : log_ (log), remembered_ (std::move (remembered))
+{
+}
+
+MidiInputService::~MidiInputService()
+{
+    stopTimer();
+    closeDevice ("application exit");
+}
+
+std::int64_t MidiInputService::nowMicros() noexcept // same clock as AudioService::nowMicros
+{
+    return std::chrono::duration_cast<std::chrono::microseconds> (Clock::now().time_since_epoch()).count();
+}
+
+std::vector<midi_io::MidiDeviceInfo> MidiInputService::enumerate() const
+{
+    std::vector<midi_io::MidiDeviceInfo> devices;
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+        devices.push_back ({ device.identifier.toStdString(), device.name.toStdString() });
+    return devices;
+}
+
+void MidiInputService::start()
+{
+    log_.write (LogLevel::info, "midi", "MIDI input service starting",
+                { { "rememberedName", remembered_.name.empty() ? "(none)" : remembered_.name },
+                  { "rememberedIdentifier", remembered_.identifier.empty() ? "(none)" : remembered_.identifier } });
+    rescan ("startup");
+    startTimer (drainIntervalMs);
+}
+
+void MidiInputService::rescan (const char* reason)
+{
+    const auto now = enumerate();
+    const auto change = midi_io::diffDevices (devices_, now);
+    const bool first = ticks_ == 0 && std::string (reason) == "startup";
+
+    if (first || std::string (reason) != "poll")
+    {
+        std::string list;
+        for (const auto& device : now)
+            list += (list.empty() ? "" : "; ") + describe (device);
+        log_.write (LogLevel::info, "midi", "MIDI inputs enumerated",
+                    { { "reason", reason },
+                      { "count", std::to_string (now.size()) },
+                      { "devices", list.empty() ? "(none)" : list } });
+        if (now.empty())
+            log_.write (LogLevel::warning, "midi",
+                        "Windows reports no MIDI inputs. Check the USB cable is in the piano's USB TO HOST port, "
+                        "the piano is on, and the device appears in Device Manager.");
+    }
+    for (const auto& device : change.added)
+        log_.write (LogLevel::info, "midi", "MIDI input appeared", { { "device", describe (device) } });
+    for (const auto& device : change.removed)
+        log_.write (LogLevel::warning, "midi", "MIDI input disappeared", { { "device", describe (device) } });
+
+    devices_ = now;
+
+    if (input_ != nullptr)
+    {
+        const bool stillPresent = std::find (devices_.begin(), devices_.end(), openDevice_) != devices_.end();
+        if (! stillPresent)
+        {
+            closeDevice ("device disappeared");
+            deviceLost_ = true;
+        }
+    }
+
+    if (input_ == nullptr && (! change.empty() || first || std::string (reason) != "poll"))
+    {
+        if (const auto choice = midi_io::chooseInputDevice (devices_, remembered_.identifier, remembered_.name))
+        {
+            log_.write (LogLevel::info, "midi", "Automatic input choice",
+                        { { "device", describe (choice->device) }, { "reason", midi_io::toString (choice->reason) } });
+            openDevice (choice->device, midi_io::toString (choice->reason));
+        }
+        else if (! remembered_.name.empty() && ! devices_.empty())
+        {
+            log_.write (LogLevel::info, "midi", "Remembered input not present; waiting for it or a user choice",
+                        { { "remembered", remembered_.name } });
+        }
+    }
+
+    publishView();
+}
+
+void MidiInputService::selectByUser (const std::string& identifier)
+{
+    const auto it = std::find_if (devices_.begin(), devices_.end(),
+                                  [&] (const auto& d) { return d.identifier == identifier; });
+    if (it == devices_.end())
+    {
+        log_.write (LogLevel::warning, "ui", "User chose an input that is no longer listed",
+                    { { "identifier", identifier } });
+        rescan ("user choice of missing device");
+        return;
+    }
+
+    log_.write (LogLevel::info, "ui", "User chose MIDI input", { { "device", describe (*it) } });
+    const auto device = *it;
+    remembered_ = { device.identifier, device.name };
+    if (choiceListener_)
+        choiceListener_ (device);
+
+    if (input_ != nullptr && openDevice_ == device)
+    {
+        publishView();
+        return;
+    }
+    closeDevice ("user switched input");
+    openDevice (device, "user choice");
+    publishView();
+}
+
+void MidiInputService::openDevice (const midi_io::MidiDeviceInfo& device, const char* reason)
+{
+    openFailed_ = false;
+    openError_.clear();
+    auto input = juce::MidiInput::openDevice (juce::String (device.identifier), this);
+    if (input == nullptr)
+    {
+        openFailed_ = true;
+        openDevice_ = device;
+        openError_ = tr ("Windows refused to open it. Another program, or a PianoAssist still closing, may be using it.");
+        log_.write (LogLevel::error, "midi",
+                    "Could not open MIDI input. Another program (a DAW, FL Studio, Casio app) may be using it; "
+                    "close it and press Rescan.",
+                    { { "device", describe (device) }, { "reason", reason } });
+        return;
+    }
+
+    input->start();
+    input_ = std::move (input);
+    openDevice_ = device;
+    deviceLost_ = false;
+    callbacksAtOpen_ = callbacks_.load (std::memory_order_relaxed);
+    firstEventLogged_ = false;
+    remembered_ = { device.identifier, device.name };
+    if (choiceListener_)
+        choiceListener_ (device);
+    log_.write (LogLevel::info, "midi", "MIDI input opened", { { "device", describe (device) }, { "reason", reason } });
+    logStats ("opened");
+}
+
+void MidiInputService::closeDevice (const char* reason)
+{
+    if (input_ == nullptr)
+        return;
+    logStats (reason);
+    input_->stop();
+    input_.reset();
+    drainQueue();
+
+    const auto released = monitor_.releaseAll();
+    std::string pitches;
+    for (const auto pitch : released)
+        pitches += (pitches.empty() ? "" : " ") + noteName (pitch);
+    log_.write (LogLevel::info, "midi", "MIDI input closed",
+                { { "device", describe (openDevice_) },
+                  { "reason", reason },
+                  { "releasedHeldNotes", pitches.empty() ? "(none)" : pitches } });
+}
+
+void MidiInputService::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
+{
+    crash::nameThisThread ("midi");
+    callbacks_.fetch_add (1, std::memory_order_relaxed);
+    receive (message.getRawData(), message.getRawDataSize());
+}
+
+void MidiInputService::receive (const juce::uint8* raw, int size) noexcept
+{
+    // Device thread: no allocation, logging or UI calls; counters are relaxed
+    // atomics. The only wait is the short producer guard below, which a
+    // diagnostic test note holds for two queue pushes.
+    const auto timestamp = nowMicros();
+    while (producerBusy_.test_and_set (std::memory_order_acquire))
+    {
+    }
+    struct Release
+    {
+        std::atomic_flag& flag;
+        ~Release() { flag.clear (std::memory_order_release); }
+    } release { producerBusy_ };
+    if (size > 0 && raw[0] != 0xf8 && raw[0] != 0xfe) // clock and active sensing would hide the notes
+    {
+        std::uint32_t packed = static_cast<std::uint32_t> (std::min (size, 3)) << 24 | static_cast<std::uint32_t> (raw[0]) << 16;
+        if (size > 1)
+            packed |= static_cast<std::uint32_t> (raw[1]) << 8;
+        if (size > 2)
+            packed |= raw[2];
+        lastRaw_.store (packed, std::memory_order_relaxed);
+        lastRawMicros_.store (timestamp, std::memory_order_relaxed);
+    }
+    if (const auto event = midi_io::normalizeMidiMessage (raw, static_cast<std::size_t> (size), timestamp, sequence_++))
+    {
+        queued_.fetch_add (1, std::memory_order_relaxed);
+        if (! queue_.push (*event))
+            overflows_.fetch_add (1, std::memory_order_relaxed);
+        if (! lessonQueue_.push (*event))
+            overflows_.fetch_add (1, std::memory_order_relaxed);
+    }
+}
+
+void MidiInputService::injectTestNote()
+{
+    log_.write (LogLevel::info, "midi", "Synthetic test note sent through the input path",
+                { { "inputOpen", input_ != nullptr ? "yes" : "no" } });
+    const juce::uint8 on[] = { 0x90, 60, 64 };
+    receive (on, 3);
+    juce::Timer::callAfterDelay (150, [this] {
+        const juce::uint8 off[] = { 0x80, 60, 0 };
+        receive (off, 3);
+    });
+}
+
+void MidiInputService::logStats (const char* why)
+{
+    const auto callbacks = callbacks_.load (std::memory_order_relaxed);
+    const auto lesson = lessonProcessed_ ? lessonProcessed_() : 0;
+    log_.write (LogLevel::info, "midi", "MIDI input path",
+                { { "why", why },
+                  { "input", openDevice_.name.empty() ? remembered_.name : openDevice_.name },
+                  { "open", input_ != nullptr ? "yes" : "no" },
+                  { "callbacks", std::to_string (callbacks) },
+                  { "queued", std::to_string (queued_.load (std::memory_order_relaxed)) },
+                  { "processedByWindow", std::to_string (processed_) },
+                  { "processedByPractice", std::to_string (lesson) },
+                  { "overflows", std::to_string (overflows_.load (std::memory_order_relaxed)) } });
+    loggedCallbacks_ = callbacks;
+    loggedLesson_ = lesson;
+    lastStatsLogMicros_ = nowMicros();
+}
+
+void MidiInputService::drainQueue()
+{
+    bool changed = false;
+    while (const auto event = queue_.pop())
+    {
+        monitor_.apply (*event);
+        ++processed_;
+        changed = true;
+        if (! firstEventLogged_ && input_ != nullptr)
+        {
+            firstEventLogged_ = true;
+            log_.write (LogLevel::info, "midi", "First event received from the open input", { { "device", describe (openDevice_) } });
+        }
+
+        switch (event->type)
+        {
+            case InputEventType::noteOn:
+            case InputEventType::noteOff:
+                log_.write (LogLevel::debug, "input", event->type == InputEventType::noteOn ? "noteOn" : "noteOff",
+                            { { "note", noteName (event->data1) },
+                              { "velocity", std::to_string (event->data2) },
+                              { "channel", std::to_string (event->channel + 1) },
+                              { "t_us", std::to_string (event->timestampMicros) } });
+                break;
+            case InputEventType::sustain:
+                log_.write (LogLevel::debug, "input", "sustain",
+                            { { "value", std::to_string (event->data2) },
+                              { "t_us", std::to_string (event->timestampMicros) } });
+                break;
+            case InputEventType::other:
+                break;
+        }
+    }
+
+    if (const auto dropped = queue_.takeDroppedCount(); dropped > 0)
+        log_.write (LogLevel::error, "input", "Input queue overflow; events dropped",
+                    { { "dropped", std::to_string (dropped) } });
+
+    const auto others = monitor_.counters().otherMessages;
+    const auto now = nowMicros();
+    if (others != otherMessagesLogged_ && now - lastOtherLogMicros_ >= otherMessageLogIntervalMicros)
+    {
+        log_.write (LogLevel::debug, "input", "Other MIDI messages received (not used)",
+                    { { "since_last_report", std::to_string (others - otherMessagesLogged_) } });
+        otherMessagesLogged_ = others;
+        lastOtherLogMicros_ = now;
+    }
+
+    // Practice takes its own copy of each event; if it stops taking them,
+    // the keyboard still lights but nothing is judged. Say so once.
+    if (lessonProcessed_)
+    {
+        const auto queued = queued_.load (std::memory_order_relaxed);
+        const auto lesson = lessonProcessed_();
+        if (lesson < queued && lesson == lessonSeenProcessed_)
+        {
+            if (lessonBehindSinceMicros_ == 0)
+                lessonBehindSinceMicros_ = now;
+            else if (! lessonStallLogged_ && now - lessonBehindSinceMicros_ > 2'000'000)
+            {
+                lessonStallLogged_ = true;
+                log_.write (LogLevel::error, "midi", "Practice is not taking input events",
+                            { { "queued", std::to_string (queued) }, { "processedByPractice", std::to_string (lesson) } });
+            }
+        }
+        else
+        {
+            lessonBehindSinceMicros_ = 0;
+            lessonStallLogged_ = false;
+        }
+        lessonSeenProcessed_ = lesson;
+    }
+    if (callbacks_.load (std::memory_order_relaxed) != loggedCallbacks_ && now - lastStatsLogMicros_ >= 10'000'000)
+        logStats ("periodic");
+
+    if (changed)
+        publishView();
+}
+
+void MidiInputService::timerCallback()
+{
+    drainQueue();
+    if (++ticks_ % rescanEveryTicks == 0)
+    {
+        // A refused open is tried again every few seconds: the other program may have let go.
+        if (input_ == nullptr && openFailed_ && ticks_ % (rescanEveryTicks * 5) == 0)
+            if (const auto it = std::find (devices_.begin(), devices_.end(), openDevice_); it != devices_.end())
+                openDevice (*it, "retry after refused open");
+        rescan ("poll");
+        publishView(); // refresh the event-rate readout
+    }
+}
+
+void MidiInputService::publishView()
+{
+    if (! viewListener_)
+        return;
+
+    ui::InputMonitorView view;
+    for (const auto& device : devices_)
+        view.devices.push_back ({ device.identifier, device.name });
+    view.selectedIdentifier = (input_ != nullptr || openFailed_) ? openDevice_.identifier : remembered_.identifier;
+
+    using Status = ui::InputMonitorView::Status;
+    if (input_ != nullptr)
+    {
+        view.status = Status::connected;
+        view.statusText = tr ("Connected: %1. Press keys to test.", openDevice_.name);
+    }
+    else if (openFailed_)
+    {
+        view.status = Status::openFailed;
+        view.statusText = tr ("Could not open %1.", openDevice_.name);
+        view.bannerText = tr ("Another program may be using the piano. Close it, then press Rescan.");
+    }
+    else if (deviceLost_)
+    {
+        view.status = Status::lost;
+        view.statusText = tr ("Waiting for %1 to come back...", openDevice_.name);
+        view.bannerText = tr ("Piano disconnected. Reconnect the USB cable; it will be picked up automatically.");
+    }
+    else if (devices_.empty())
+    {
+        view.status = Status::noDevices;
+        view.statusText = tr ("Windows reports no MIDI inputs. Turn the piano on and connect USB TO HOST.");
+    }
+    else if (! remembered_.name.empty())
+    {
+        view.status = Status::waiting;
+        view.statusText = tr ("Waiting for %1, or choose another input.", remembered_.name);
+    }
+    else
+    {
+        view.status = Status::notSelected;
+        view.statusText = tr ("Choose your piano.");
+    }
+
+    if (const auto& last = monitor_.lastNote())
+        view.lastNote = noteName (last->pitch) + "  vel " + std::to_string (last->velocity);
+    view.heldPitches = monitor_.heldPitches();
+    for (const auto pitch : view.heldPitches)
+        view.heldNotes += (view.heldNotes.empty() ? "" : " ") + noteName (pitch);
+    view.sustainDown = monitor_.sustainDown();
+    view.eventsPerSecond = monitor_.eventsPerSecond (nowMicros());
+    view.totalNoteOns = monitor_.counters().noteOns;
+
+    view.inputName = ! openDevice_.name.empty() ? openDevice_.name : remembered_.name;
+    view.found = std::any_of (devices_.begin(), devices_.end(), [&] (const auto& d) {
+        return (input_ != nullptr || openFailed_) ? d == openDevice_ : d.name == remembered_.name;
+    });
+    view.opened = input_ != nullptr;
+    view.callbacks = callbacks_.load (std::memory_order_relaxed);
+    view.queued = queued_.load (std::memory_order_relaxed);
+    view.processed = processed_;
+    view.lessonProcessed = lessonProcessed_ ? lessonProcessed_() : 0;
+    view.overflows = overflows_.load (std::memory_order_relaxed);
+    view.openError = openError_;
+    if (const auto packed = lastRaw_.load (std::memory_order_relaxed); packed != 0)
+    {
+        const auto size = static_cast<int> (packed >> 24);
+        char text[32];
+        std::snprintf (text, sizeof (text), size >= 3 ? "%02X %02X %02X" : size == 2 ? "%02X %02X" : "%02X",
+                       (packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff);
+        const auto ago = (nowMicros() - lastRawMicros_.load (std::memory_order_relaxed)) / 1'000'000;
+        view.lastEvent = std::string (text) + "  (" + std::to_string (ago) + " s)";
+        view.receiving = ago < 5 && view.callbacks > callbacksAtOpen_;
+    }
+
+    viewListener_ (view);
+}
+
+} // namespace pianoassist::app
