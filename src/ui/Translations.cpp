@@ -276,6 +276,10 @@ constexpr Pair pairs[] = {
     { "Waiting for %1, or choose another input.", "Ждём %1 или выберите другой вход." },
     { "Choose your piano.", "Выберите пианино." },
 
+    // Practice ranges
+    { "Count-in", "Отсчёт" },
+    { "Count-in before playing (one bar)", "Отсчёт перед игрой (один такт)" },
+
     // Application dialogs
     { "How to practise", "Как заниматься" },
     { "How to practise\n\n"

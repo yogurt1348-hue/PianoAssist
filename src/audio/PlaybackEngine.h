@@ -83,6 +83,7 @@ public:
 private:
     void releaseOwned (int sampleOffset) noexcept;
     void moveTo (double seconds) noexcept;
+    void restorePedal() noexcept;
     bool queueEvent (const ScheduledMidiEvent& event) noexcept;
 
     const PlaybackEventList* events_ = nullptr;

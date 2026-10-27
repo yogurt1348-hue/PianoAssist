@@ -42,6 +42,7 @@ struct PracticeChoices
     lesson::Accompaniment accompaniment;
     bool waitForNotes = false;   ///< "Wait for my notes" (practice) on at start
     double tempoPercent = 100.0; ///< 25-200
+    bool countIn = false;        ///< one bar of clicks before Play and each loop repeat (global)
 
     friend bool operator== (const PracticeChoices&, const PracticeChoices&) = default;
 };

@@ -34,6 +34,7 @@ Settings customSettings()
     s.practice.waitForNotes = true;
     s.sound.pluginFolders = { "D:\\VST3", "E:\\Плагины" };
     s.practice.tempoPercent = 75.0;
+    s.practice.countIn = true;
     s.appearance = { "light", "en", 1.25 };
     s.audio.deviceStateXml = "<DEVICESETUP deviceType=\"Windows Audio\"/>";
     s.recentFiles = { "C:\\Music\\Прелюдия.mid", "D:\\song.mid" };

@@ -13,6 +13,12 @@ std::size_t countOf (const std::vector<std::uint8_t>& values, std::uint8_t value
 {
     return static_cast<std::size_t> (std::count (values.begin(), values.end(), value));
 }
+
+template <typename T>
+std::size_t countPitch (const std::vector<T>& presses, std::uint8_t pitch)
+{
+    return static_cast<std::size_t> (std::count_if (presses.begin(), presses.end(), [pitch] (const T& p) { return p.pitch == pitch; }));
+}
 } // namespace
 
 const char* toString (PressVerdict verdict) noexcept
@@ -65,7 +71,9 @@ std::vector<std::uint8_t> PracticeSession::missingPitches() const
     std::vector<std::uint8_t> missing;
     if (finished())
         return missing;
-    auto remaining = matched_;
+    std::vector<std::uint8_t> remaining;
+    for (const auto& m : matched_)
+        remaining.push_back (m.pitch);
     for (const auto pitch : gates_[current_].requiredPitches)
     {
         const auto it = std::find (remaining.begin(), remaining.end(), pitch);
@@ -79,7 +87,9 @@ std::vector<std::uint8_t> PracticeSession::missingPitches() const
 
 std::vector<std::uint8_t> PracticeSession::matchedPitches() const
 {
-    auto sorted = matched_;
+    std::vector<std::uint8_t> sorted;
+    for (const auto& m : matched_)
+        sorted.push_back (m.pitch);
     std::sort (sorted.begin(), sorted.end());
     return sorted;
 }
@@ -109,14 +119,17 @@ PressResult PracticeSession::judge (std::uint8_t pitch, double songSeconds)
         result.verdict = PressVerdict::tooEarly;
         return result;
     }
-    if (countOf (matched_, pitch) >= required)
+    // An incomplete attempt expires: notes matched too long ago drop out.
+    std::erase_if (matched_, [songSeconds] (const Retained& m) { return songSeconds - m.songSeconds > chordWindowSeconds; });
+
+    if (countPitch (matched_, pitch) >= required)
     {
         result.verdict = PressVerdict::alreadyMatched;
         retain (pitch, songSeconds);
         return result;
     }
 
-    matched_.push_back (pitch);
+    matched_.push_back ({ pitch, songSeconds });
     result.verdict = result.offsetMs < 0.0                  ? PressVerdict::acceptedEarly
                      : result.offsetMs <= profile_.onsetLateMs + edgeToleranceMs ? PressVerdict::acceptedOnTime
                                                                : PressVerdict::acceptedLate;
@@ -124,7 +137,7 @@ PressResult PracticeSession::judge (std::uint8_t pitch, double songSeconds)
     {
         result.gatePassed = true;
         ++passed_;
-        advance();
+        advance (songSeconds);
     }
     return result;
 }
@@ -142,7 +155,7 @@ PressResult PracticeSession::press (std::uint8_t pitch, double songSeconds)
     return judge (pitch, songSeconds);
 }
 
-void PracticeSession::advance()
+void PracticeSession::advance (double passedAt)
 {
     ++current_;
     matched_.clear();
@@ -158,14 +171,15 @@ void PracticeSession::advance()
     {
         const double offsetMs = (press.songSeconds - onset) * 1000.0;
         const bool inWindow = offsetMs >= -profile_.onsetEarlyMs - edgeToleranceMs;
-        if (inWindow && countOf (gates_[current_].requiredPitches, press.pitch) > countOf (matched_, press.pitch))
-            matched_.push_back (press.pitch);
+        const bool recent = passedAt - press.songSeconds <= carryWindowSeconds + 1.0e-9;
+        if (inWindow && recent && countOf (gates_[current_].requiredPitches, press.pitch) > countPitch (matched_, press.pitch))
+            matched_.push_back (press);
     }
     if (! finished() && ! gates_[current_].requiredPitches.empty() && matched_.size() == gates_[current_].requiredPitches.size())
     {
         // Fully satisfied by retained presses; extremely rare but consistent.
         ++passed_;
-        advance();
+        advance (passedAt);
     }
 }
 

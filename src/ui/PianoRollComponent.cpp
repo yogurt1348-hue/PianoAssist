@@ -149,6 +149,16 @@ void PianoRollComponent::paint (juce::Graphics& g)
             const float x1 = xForSeconds (loopStart_), x2 = xForSeconds (loopEnd_);
             g.setColour (theme::accent.withAlpha (0.35f));
             g.fillRoundedRectangle (juce::Rectangle<float> (x1, 3.0f, x2 - x1, static_cast<float> (rulerHeight - 6)), 4.0f);
+            // Grab handles: A and B flags, wide enough to catch without aiming.
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            for (const auto& [x, text] : { std::pair<float, const char*> { x1, "A" }, std::pair<float, const char*> { x2, "B" } })
+            {
+                const auto flag = juce::Rectangle<float> (x - 8.0f, 1.0f, 16.0f, static_cast<float> (rulerHeight - 2));
+                g.setColour (theme::accent);
+                g.fillRoundedRectangle (flag, 3.0f);
+                g.setColour (theme::onAccent);
+                g.drawText (text, flag, juce::Justification::centred);
+            }
         }
         g.setFont (juce::FontOptions (12.0f));
         g.setColour (theme::mutedText);
@@ -197,9 +207,9 @@ void PianoRollComponent::paint (juce::Graphics& g)
         const float x1 = xForSeconds (loopStart_), x2 = xForSeconds (loopEnd_);
         g.setColour (theme::accent.withAlpha (0.08f));
         g.fillRect (juce::Rectangle<float> (x1, static_cast<float> (area.getY()), x2 - x1, static_cast<float> (area.getHeight())));
-        g.setColour (theme::accent.withAlpha (0.6f));
-        g.drawVerticalLine (static_cast<int> (x1), static_cast<float> (area.getY()), static_cast<float> (area.getBottom()));
-        g.drawVerticalLine (static_cast<int> (x2), static_cast<float> (area.getY()), static_cast<float> (area.getBottom()));
+        g.setColour (theme::accent.withAlpha (0.8f));
+        g.fillRect (juce::Rectangle<float> (x1 - 1.0f, static_cast<float> (area.getY()), 2.0f, static_cast<float> (area.getHeight())));
+        g.fillRect (juce::Rectangle<float> (x2 - 1.0f, static_cast<float> (area.getY()), 2.0f, static_cast<float> (area.getHeight())));
     }
     const float playheadX = xForSeconds (playheadSeconds_);
     g.setColour (theme::playhead);
@@ -241,6 +251,36 @@ double PianoRollComponent::snapToBar (double seconds) const
     return best;
 }
 
+double PianoRollComponent::barAtOrBefore (double seconds) const
+{
+    if (view_ == nullptr || view_->barStarts.empty())
+        return seconds;
+    double best = 0.0;
+    for (const double bar : view_->barStarts)
+    {
+        if (bar > seconds + 1.0e-6)
+            break;
+        best = bar;
+    }
+    return best;
+}
+
+int PianoRollComponent::loopEdgeAt (float x) const
+{
+    if (! loopEnabled_ || loopEnd_ <= loopStart_)
+        return 0;
+    constexpr float grab = 9.0f;
+    const float da = std::abs (x - xForSeconds (loopStart_)), db = std::abs (x - xForSeconds (loopEnd_));
+    if (da > grab && db > grab)
+        return 0;
+    return da <= db ? 1 : 2;
+}
+
+void PianoRollComponent::mouseMove (const juce::MouseEvent& e)
+{
+    setMouseCursor (loopEdgeAt (e.position.x) != 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+}
+
 void PianoRollComponent::setLoop (bool enabled, double startSeconds, double endSeconds)
 {
     loopEnabled_ = enabled;
@@ -256,6 +296,9 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
     if (view_ == nullptr || ! clickable.contains (e.getPosition()))
         return;
     dragAnchor_ = secondsAt (e.position.x);
+    edgeDrag_ = loopEdgeAt (e.position.x);
+    if (edgeDrag_ != 0)
+        return; // moving A or B, anywhere along the edge
     if (e.position.y < static_cast<float> (rulerHeight))
         return; // the ruler: a click seeks on mouse up, a drag selects a loop
     if (onSeekRequested)
@@ -264,6 +307,18 @@ void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
 
 void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
 {
+    if (view_ != nullptr && edgeDrag_ != 0)
+    {
+        // Edges snap to bars; hold Alt to place them freely.
+        auto t = secondsAt (e.position.x);
+        if (! e.mods.isAltDown())
+            t = snapToBar (t);
+        if (edgeDrag_ == 1)
+            setLoop (true, std::min (t, loopEnd_ - 0.05), loopEnd_);
+        else
+            setLoop (true, loopStart_, std::max (t, loopStart_ + 0.05));
+        return;
+    }
     if (view_ == nullptr || e.mouseDownPosition.y >= static_cast<float> (rulerHeight) || e.getDistanceFromDragStartX() == 0)
         return;
     if (std::abs (e.getDistanceFromDragStartX()) < 6 && ! draggingLoop_)
@@ -276,6 +331,13 @@ void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
 
 void PianoRollComponent::mouseUp (const juce::MouseEvent& e)
 {
+    if (view_ != nullptr && edgeDrag_ != 0)
+    {
+        edgeDrag_ = 0;
+        if (onLoopSelected)
+            onLoopSelected (loopStart_, loopEnd_);
+        return;
+    }
     if (view_ == nullptr || e.mouseDownPosition.y >= static_cast<float> (rulerHeight))
         return;
     if (draggingLoop_)
@@ -286,7 +348,7 @@ void PianoRollComponent::mouseUp (const juce::MouseEvent& e)
         return;
     }
     if (onSeekRequested && rollArea().withTop (0).contains (e.getPosition()))
-        onSeekRequested (dragAnchor_);
+        onSeekRequested (barAtOrBefore (dragAnchor_)); // a click on the bar numbers starts at that bar
 }
 
 void PianoRollComponent::resized()

@@ -91,6 +91,32 @@ void PlaybackEngine::moveTo (double seconds) noexcept
     }
 }
 
+void PlaybackEngine::restorePedal() noexcept
+{
+    // After a seek or a loop jump into a pedalled passage, the pedal is down
+    // as the song has it there. Notes that started before the new position
+    // are not replayed. Bounded by the event list; seeks are rare.
+    if (events_ == nullptr)
+        return;
+    const auto& list = events_->events;
+    std::bitset<16> known;
+    for (auto i = cursor_; i > 0; --i)
+    {
+        const auto& e = list[i - 1];
+        if ((e.status & 0xF0u) != 0xB0u || e.data1 != 64)
+            continue;
+        const auto channel = static_cast<std::size_t> (e.status & 0x0Fu);
+        if (known.test (channel))
+            continue;
+        known.set (channel);
+        if (e.data2 >= 64)
+        {
+            sustainOwned_.set (channel);
+            queueEvent ({ 0, e.status, 64, e.data2 });
+        }
+    }
+}
+
 void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer& renderer) noexcept
 {
     using Type = PlaybackCommand::Type;
@@ -131,6 +157,7 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
             releaseOwned (0);
             const double limit = events_ != nullptr ? events_->durationSeconds : 0.0;
             moveTo (std::clamp (command.value, 0.0, limit));
+            restorePedal();
             if (state_ == PlaybackState::completed || state_ == PlaybackState::waitingForGate)
                 state_ = PlaybackState::paused;
             break;

@@ -427,6 +427,7 @@ private:
         lesson_->setAccompaniment (settings_.practice.accompaniment);
         lesson_->setPractising (settings_.practice.waitForNotes);
         lesson_->setTempo (settings_.practice.tempoPercent / 100.0);
+        lesson_->setCountIn (settings_.practice.countIn);
         lesson_->start();
         content->setVolume (0.8f);
         startTimerHz (30);
@@ -512,6 +513,11 @@ private:
             lesson_->setAccompaniment (settings_.practice.accompaniment);
             saveSettings();
             scheduleSongSave();
+        };
+        i.countInChanged = [this] (bool on) {
+            settings_.practice.countIn = on;
+            lesson_->setCountIn (on);
+            saveSettings();
         };
         i.partAssignmentChanged = [this] (std::size_t part, int assignment) {
             reassignPart (part, assignment);
@@ -942,8 +948,10 @@ private:
         // The song's choices become the current ones; "wait when a song is
         // opened" stays the user's global default.
         const bool waitDefault = settings_.practice.waitForNotes;
+        const bool countIn = settings_.practice.countIn;
         settings_.practice = m.practice;
         settings_.practice.waitForNotes = waitDefault;
+        settings_.practice.countIn = countIn;
         settings_.practiceProfile = lesson::profileFor (static_cast<lesson::Tolerance> (std::clamp (m.tolerance, 0, 2)));
         settings_.visual.pixelsPerSecond = m.pixelsPerSecond;
 
@@ -1262,6 +1270,9 @@ private:
         pv.required = practice.missing;
         pv.matched = practice.matched;
         pv.wrong = practice.recentWrong;
+        pv.countIn = settings_.practice.countIn;
+        pv.countInBeat = practice.countInBeat;
+        pv.countInBeats = practice.countInBeats;
         pv.gateNumber = practice.gateNumber;
         pv.gateCount = practice.gateCount;
         content_->setPractice (pv);

@@ -66,6 +66,7 @@ public:
         std::function<void (int tolerance)> toleranceChanged;
         std::function<void (bool play)> playOtherPartChanged;
         std::function<void (bool play)> playBackingChanged;
+        std::function<void (bool on)> countInChanged;
         std::function<void (std::size_t part, int assignment)> partAssignmentChanged;
         std::function<void (std::size_t part, bool muted)> partMuteChanged;
         std::function<void (std::size_t part, double volume)> partVolumeChanged;

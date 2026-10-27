@@ -3,6 +3,7 @@
 #include "app/AudioService.h"
 #include "app/MidiInputService.h"
 #include "diagnostics/RotatingLog.h"
+#include "lesson_engine/PracticeClock.h"
 #include "lesson_engine/PracticeSession.h"
 #include "timeline/Song.h"
 
@@ -41,6 +42,8 @@ struct PracticeSnapshot
     std::size_t gateNumber = 0;             ///< 1-based current gate, 0 when none
     std::size_t gateCount = 0;
     std::string lastVerdict;
+    int countInBeat = 0;  ///< 1-based click of a running count-in, 0 when none
+    int countInBeats = 0;
 };
 
 /** The control thread. Owns transport transitions and gate decisions: user
@@ -77,6 +80,8 @@ public:
     /** Per-part volume 0-1 (scales velocities); 0 silences the part. */
     void setPartGains (std::vector<double> gains);
     void previewKey (std::uint8_t pitch, bool down); ///< a click on the on-screen keyboard
+    /** One bar of clicks before Play and before each loop repeat. */
+    void setCountIn (bool on);
 
     PracticeSnapshot snapshot() const;
 
@@ -95,14 +100,19 @@ private:
     struct SetTempo { double rate; };
     struct SetLoop { bool enabled; double start; double end; };
     struct SetPartGains { std::vector<double> gains; };
+    struct SetCountIn { bool on; };
     using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, SetAccompaniment,
-                                SetMutedParts, PreviewKey, SetTempo, SetLoop, SetPartGains>;
+                                SetMutedParts, PreviewKey, SetTempo, SetLoop, SetPartGains, SetCountIn>;
 
     void post (Intent intent);
     void hiResTimerCallback() override;
     void handle (const Intent& intent);
     void rebuild (double position, const char* why);
     void checkLoop (const AudioService::Snapshot& audio);
+    /** Plays now, or after a count-in when it is on. */
+    void startPlaying (double position);
+    void tickCountIn();
+    void cancelCountIn();
     void resetGates (double position);
     void sendGate();
     void handleInput (const midi_io::InputEvent& event, const AudioService::Snapshot& audio);
@@ -128,6 +138,16 @@ private:
     SetLoop loop_ { false, 0.0, 0.0 };
     bool loopJumping_ = false;
     std::int64_t loopJumpMicros_ = 0;
+    bool countInEnabled_ = false;
+    struct CountInRun
+    {
+        bool active = false;
+        lesson::CountIn plan;
+        std::int64_t startMicros = 0;
+        int clicked = 0;
+        std::int64_t offDueMicros = -1;
+        std::uint8_t lastPitch = 96;
+    } countIn_;
     std::optional<lesson::PracticeSession> session_;
     std::vector<GateHands> hands_; ///< parallel to the session's gates
     std::uint64_t seenArrivals_ = 0;

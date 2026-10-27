@@ -38,6 +38,7 @@ public:
     void mouseDown (const juce::MouseEvent& e) override;
     void mouseDrag (const juce::MouseEvent& e) override;
     void mouseUp (const juce::MouseEvent& e) override;
+    void mouseMove (const juce::MouseEvent& e) override;
 
 private:
     static constexpr int gutterWidth = 44;
@@ -60,9 +61,13 @@ private:
     bool loopEnabled_ = false;
     double loopStart_ = 0.0, loopEnd_ = 0.0;
     bool draggingLoop_ = false;
+    int edgeDrag_ = 0; ///< 1 = moving the loop start (A), 2 = the end (B)
+    /** 1 or 2 when x is within grabbing distance of the A or B edge. */
+    int loopEdgeAt (float x) const;
     double dragAnchor_ = 0.0;
     double secondsAt (float x) const;
     double snapToBar (double seconds) const;
+    double barAtOrBefore (double seconds) const;
     int lowPitch_ = 48;
     int highPitch_ = 84;
     juce::ScrollBar scrollBar_ { false };

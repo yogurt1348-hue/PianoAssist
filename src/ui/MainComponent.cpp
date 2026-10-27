@@ -650,6 +650,10 @@ void MainComponent::refreshStatus()
                          : input_.status == Status::openFailed ? TRANS ("Another program is using the piano. Close it, then choose the piano in Settings.")
                          : TRANS ("Connect the piano (USB TO HOST) to play along. You can still listen.");
 
+    if (practice_.countInBeat > 0)
+        return board_.setMessage (TRANS ("Count-in") + ": " + juce::String (practice_.countInBeat) + " / " + juce::String (practice_.countInBeats),
+                                  TRANS ("Get ready: your notes come next."), Tone::waiting, practice_.practising);
+
     switch (transport_.state)
     {
         case State::noSong:
@@ -1103,6 +1107,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addItem (TRANS ("Clear loop"), hasSong && loopEnd_ > loopStart_, false, [this] {
                 setLoop (false, 0.0, 0.0);
                 if (intents_.loopChanged) intents_.loopChanged (false, 0.0, 0.0); });
+            menu.addItem (TRANS ("Count-in before playing (one bar)"), true, practice_.countIn, [this] {
+                if (intents_.countInChanged) intents_.countInChanged (! practice_.countIn); });
             menu.addSeparator();
             menu.addItem (TRANS ("Play other hand"), practice_.mode != 0, practice_.playOtherPart, [this] { otherPartToggle_.triggerClick(); });
             menu.addItem (TRANS ("Play other tracks"), true, practice_.playBacking, [this] { backingToggle_.triggerClick(); });

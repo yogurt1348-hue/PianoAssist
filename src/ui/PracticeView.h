@@ -33,6 +33,9 @@ struct PracticeView
     std::vector<std::uint8_t> wrong;    ///< recent wrong presses
     StepView current;                   ///< current step, both played and not
     std::vector<StepView> upcoming;     ///< the next few steps
+    bool countIn = false;   ///< one bar of clicks before playing
+    int countInBeat = 0;    ///< running count-in click, 0 when none
+    int countInBeats = 0;
     std::size_t gateNumber = 0;
     std::size_t gateCount = 0;
 };

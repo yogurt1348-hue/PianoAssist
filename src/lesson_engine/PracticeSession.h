@@ -45,6 +45,9 @@ struct PressResult
 class PracticeSession
 {
 public:
+    static constexpr double chordWindowSeconds = 1.5;
+    static constexpr double carryWindowSeconds = 0.15;
+
     PracticeSession (std::vector<Gate> gates, PracticeProfile profile);
 
     /** Restart from a song position: the first gate at or after it is
@@ -73,14 +76,14 @@ private:
         double songSeconds;
     };
 
-    void advance();
+    void advance (double passedAt);
     void retain (std::uint8_t pitch, double songSeconds);
     PressResult judge (std::uint8_t pitch, double songSeconds);
 
     std::vector<Gate> gates_;
     PracticeProfile profile_;
     std::size_t current_ = 0;
-    std::vector<std::uint8_t> matched_;
+    std::vector<Retained> matched_;  ///< the current attempt
     std::vector<Retained> retained_; ///< presses that may belong to the next gate
     std::size_t passed_ = 0;
 };

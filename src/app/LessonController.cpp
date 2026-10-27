@@ -2,6 +2,7 @@
 
 #include "core/NoteName.h"
 #include "lesson_engine/Gate.h"
+#include "lesson_engine/PracticeClock.h"
 
 #include <algorithm>
 #include <cmath>
@@ -105,6 +106,7 @@ void LessonController::setPractising (bool on) { post (SetPractising { on }); }
 void LessonController::setMode (lesson::PracticeMode mode) { post (SetMode { mode }); }
 void LessonController::setProfile (lesson::PracticeProfile profile) { post (SetProfile { std::move (profile) }); }
 void LessonController::previewKey (std::uint8_t pitch, bool down) { post (PreviewKey { pitch, down }); }
+void LessonController::setCountIn (bool on) { post (SetCountIn { on }); }
 
 PracticeSnapshot LessonController::snapshot() const
 {
@@ -196,6 +198,7 @@ void LessonController::handle (const Intent& intent)
                     partGains_.clear();
                     loop_ = { false, 0.0, 0.0 };
                 }
+                cancelCountIn();
                 song_ = i.song;
                 if (i.keepPosition)
                     audio_.stop();
@@ -205,7 +208,12 @@ void LessonController::handle (const Intent& intent)
             {
                 if (! song_)
                     return;
-                if (audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate)
+                if (countIn_.active)
+                {
+                    logTransport ("User cancelled the count-in", audio);
+                    cancelCountIn();
+                }
+                else if (audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate)
                 {
                     logTransport ("User pressed Pause", audio);
                     audio_.pause();
@@ -213,25 +221,41 @@ void LessonController::handle (const Intent& intent)
                 else
                 {
                     logTransport ("User pressed Play", audio);
+                    double from = audio.positionSeconds;
                     if (audio.state == PlaybackState::completed)
-                        resetGates (0.0);
-                    audio_.play();
+                    {
+                        // Start again: from the loop start when a loop is set.
+                        from = loop_.enabled && loop_.end > loop_.start ? loop_.start : 0.0;
+                        audio_.seek (from);
+                        resetGates (from);
+                    }
+                    startPlaying (from);
                 }
+            }
+            else if constexpr (std::is_same_v<T, SetCountIn>)
+            {
+                countInEnabled_ = i.on;
+                if (! i.on)
+                    cancelCountIn();
+                log_.write (LogLevel::info, "lesson", i.on ? "Count-in on" : "Count-in off");
             }
             else if constexpr (std::is_same_v<T, Stop>)
             {
+                cancelCountIn();
                 logTransport ("User pressed Stop", audio);
                 audio_.stop();
                 resetGates (0.0);
             }
             else if constexpr (std::is_same_v<T, Seek>)
             {
+                cancelCountIn();
                 log_.write (LogLevel::info, "transport", "User seeked", { { "to", seconds (i.seconds) } });
                 audio_.seek (i.seconds);
                 resetGates (i.seconds);
             }
             else if constexpr (std::is_same_v<T, Silence>)
             {
+                cancelCountIn();
                 logTransport ("User pressed Silence", audio);
                 audio_.silence();
             }
@@ -338,13 +362,14 @@ void LessonController::handleInput (const midi_io::InputEvent& event, const Audi
     // transport stopped (the gate boundary, or later if the boundary was
     // already behind it); the wall time since arrival measures lateness.
     // Wall time becomes song time at the current tempo.
-    const auto rate = audio.rate;
-    const auto offset = inputOffsetMs_ / 1000.0 * rate;
-    double songTime = 0.0;
-    if (audio.state == PlaybackState::waitingForGate)
-        songTime = audio.positionSeconds + static_cast<double> (event.timestampMicros - audio.arrivalMicros) / 1.0e6 * rate - offset;
-    else
-        songTime = audio.blockStartPosition + static_cast<double> (event.timestampMicros - audio.blockStartMicros) / 1.0e6 * rate - offset;
+    lesson::TransportClock clock;
+    clock.waiting = audio.state == PlaybackState::waitingForGate;
+    clock.positionSeconds = audio.positionSeconds;
+    clock.arrivalMicros = audio.arrivalMicros;
+    clock.blockStartPosition = audio.blockStartPosition;
+    clock.blockStartMicros = audio.blockStartMicros;
+    clock.rate = audio.rate;
+    const double songTime = lesson::songTimeOfPress (clock, event.timestampMicros, inputOffsetMs_);
 
     const auto result = session_->press (event.data1, songTime);
     lastVerdict_ = noteName (event.data1) + ": " + lesson::toString (result.verdict);
@@ -381,6 +406,11 @@ void LessonController::publish (const AudioService::Snapshot& audio)
     snap.mode = mode_;
     snap.waiting = audio.state == PlaybackState::waitingForGate;
     snap.lastVerdict = lastVerdict_;
+    if (countIn_.active)
+    {
+        snap.countInBeat = std::max (1, countIn_.clicked);
+        snap.countInBeats = countIn_.plan.beats;
+    }
     for (const auto& [pitch, when] : wrong_)
         snap.recentWrong.push_back (pitch);
     if (session_)
@@ -407,8 +437,9 @@ void LessonController::publish (const AudioService::Snapshot& audio)
 
 void LessonController::checkLoop (const AudioService::Snapshot& audio)
 {
-    if (! loop_.enabled || ! song_ || loop_.end <= loop_.start)
+    if (! song_ || countIn_.active)
         return;
+    const lesson::LoopRange range { loop_.enabled, loop_.start, loop_.end };
     const auto now = AudioService::nowMicros();
     if (loopJumping_)
     {
@@ -419,19 +450,83 @@ void LessonController::checkLoop (const AudioService::Snapshot& audio)
     }
     const bool running = audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate;
     const bool finished = audio.state == PlaybackState::completed && lastState_ != PlaybackState::completed;
-    const bool atEnd = (running && audio.positionSeconds >= loop_.end - 1.0e-3) || (finished && loop_.end >= song_->durationSeconds - 0.05);
-    if (! atEnd)
+    std::optional<double> pending;
+    if (session_)
+        if (const auto* gate = session_->currentGate())
+            pending = gate->onsetSeconds;
+    if (! lesson::loopShouldJump (range, running, finished, audio.positionSeconds, song_->durationSeconds, pending))
         return;
-    // A note of the learner's before the end still has to be played first.
-    if (session_ && audio.state == PlaybackState::waitingForGate)
-        if (const auto* gate = session_->currentGate(); gate != nullptr && gate->onsetSeconds < loop_.end)
-            return;
     log_.write (LogLevel::info, "lesson", "Loop: back to the start", { { "to", seconds (loop_.start) } });
+    // Stop releases every note the song started and the pedal; the rebuild
+    // resets the matcher and the scheduled events to the start of the range.
     audio_.stop();
     rebuild (loop_.start, "loop");
-    audio_.play();
+    startPlaying (loop_.start);
     loopJumping_ = true;
     loopJumpMicros_ = now;
+}
+
+void LessonController::startPlaying (double position)
+{
+    if (! countInEnabled_ || ! song_)
+    {
+        audio_.play();
+        return;
+    }
+    const auto tick = song_->tempoMap.secondsToTick (position);
+    int numerator = 4, denominator = 4;
+    for (const auto& ts : song_->timeSignatures)
+        if (ts.seconds <= position + 1.0e-6)
+        {
+            numerator = ts.numerator;
+            denominator = ts.denominator;
+        }
+    countIn_.plan = lesson::makeCountIn (song_->tempoMap.tempoBpmAt (tick), numerator, denominator, audio_.snapshot().rate);
+    countIn_.active = true;
+    countIn_.startMicros = AudioService::nowMicros();
+    countIn_.clicked = 0;
+    countIn_.offDueMicros = -1;
+    log_.write (LogLevel::info, "lesson", "Count-in",
+                { { "beats", std::to_string (countIn_.plan.beats) }, { "beatMs", std::to_string (static_cast<int> (countIn_.plan.beatSeconds * 1000.0)) } });
+}
+
+void LessonController::cancelCountIn()
+{
+    if (! countIn_.active)
+        return;
+    countIn_.active = false;
+    if (countIn_.offDueMicros >= 0)
+        audio_.previewKey (countIn_.lastPitch, false);
+    countIn_.offDueMicros = -1;
+}
+
+void LessonController::tickCountIn()
+{
+    if (! countIn_.active)
+        return;
+    const auto now = AudioService::nowMicros();
+    if (countIn_.offDueMicros >= 0 && now >= countIn_.offDueMicros)
+    {
+        audio_.previewKey (countIn_.lastPitch, false);
+        countIn_.offDueMicros = -1;
+    }
+    const auto beatMicros = static_cast<std::int64_t> (countIn_.plan.beatSeconds * 1.0e6);
+    if (countIn_.clicked < countIn_.plan.beats && now >= countIn_.startMicros + countIn_.clicked * beatMicros)
+    {
+        // Clicks on the preview channel: a high note, the first one higher.
+        countIn_.lastPitch = static_cast<std::uint8_t> (countIn_.clicked == 0 ? 96 : 91);
+        audio_.previewKey (countIn_.lastPitch, true);
+        countIn_.offDueMicros = now + 60'000;
+        ++countIn_.clicked;
+    }
+    else if (countIn_.clicked >= countIn_.plan.beats && now >= countIn_.startMicros + countIn_.plan.beats * beatMicros)
+    {
+        if (countIn_.offDueMicros >= 0)
+            audio_.previewKey (countIn_.lastPitch, false);
+        countIn_.active = false;
+        countIn_.offDueMicros = -1;
+        audio_.play();
+    }
 }
 
 void LessonController::hiResTimerCallback()
@@ -455,6 +550,7 @@ void LessonController::hiResTimerCallback()
                           { "at", seconds (session_->currentGate()->onsetSeconds) },
                           { "missing", names (session_->missingPitches()) } });
     }
+    tickCountIn();
     checkLoop (audio);
     if (audio.state != lastState_)
     {

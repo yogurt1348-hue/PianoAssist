@@ -132,7 +132,8 @@ std::string toJson (const Settings& s)
             { "playOtherPianoPart", s.practice.accompaniment.playOtherPianoPart },
             { "playBacking", s.practice.accompaniment.playBacking },
             { "waitForNotes", s.practice.waitForNotes },
-            { "tempoPercent", s.practice.tempoPercent } } },
+            { "tempoPercent", s.practice.tempoPercent },
+            { "countIn", s.practice.countIn } } },
         { "appearance",
           { { "theme", s.appearance.theme }, { "language", s.appearance.language }, { "uiScale", s.appearance.uiScale } } },
         { "audio", { { "deviceStateXml", s.audio.deviceStateXml } } },
@@ -203,6 +204,7 @@ LoadResult fromJson (std::string_view text)
     reader.read ("practice", "playBacking", s.practice.accompaniment.playBacking);
 
     reader.read ("practice", "waitForNotes", s.practice.waitForNotes);
+    reader.read ("practice", "countIn", s.practice.countIn);
     reader.read ("practice", "tempoPercent", s.practice.tempoPercent,
                  [] (const double& v) { return finiteIn (v, 25.0, 200.0); });
 
