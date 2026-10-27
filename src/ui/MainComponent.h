@@ -27,6 +27,8 @@ public:
         std::function<void (const std::string& identifier)> selectInput;
         std::function<void()> rescanInputs;
         std::function<void()> openLogFolder;
+        std::function<void()> copyDiagnostics;
+        std::function<void()> saveDiagnostics;
         std::function<void()> chooseMidiFile;
         std::function<void (const juce::File& file)> openMidiFile;
         std::function<void (std::size_t part, bool visible)> partVisibilityChanged;
@@ -74,7 +76,7 @@ private:
     juce::Label inputLabel_;
     juce::ComboBox inputBox_;
     juce::TextButton rescanButton_ { "Rescan" };
-    juce::TextButton logButton_ { "Open log folder" };
+    juce::TextButton logButton_ { "Diagnostics..." };
     juce::Label statusLabel_;
     juce::Label bannerLabel_;
 

@@ -12,6 +12,8 @@ add_executable(pianoassist_tests
     unit/PlaybackEngineTests.cpp
     unit/PracticeTests.cpp
     unit/PracticeModesTests.cpp
+    unit/DiagnosticReportTests.cpp
+    unit/FileSafetyTests.cpp
     unit/Fixtures.cpp)
 
 target_include_directories(pianoassist_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unit)

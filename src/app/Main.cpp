@@ -4,6 +4,8 @@
 #include "app/MidiInputService.h"
 #include "app/SongLoader.h"
 #include "core/Utf8Path.h"
+#include "core/BinaryFile.h"
+#include "diagnostics/DiagnosticReport.h"
 #include "diagnostics/RotatingLog.h"
 #include "diagnostics/SessionReport.h"
 #include "settings/Settings.h"
@@ -148,8 +150,13 @@ public:
         setUsingNativeTitleBar (true);
         setContentOwned (content, true);
         setResizable (true, true);
-        setResizeLimits (640, 400, 10000, 10000);
-        centreWithSize (getWidth(), getHeight());
+        setResizeLimits (720, 560, 10000, 10000);
+        // Fit the screen at any Windows scaling (200% on a 1080p laptop
+        // leaves about 960 x 520 logical pixels).
+        auto size = juce::Rectangle<int> (getWidth(), getHeight());
+        if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+            size = size.getIntersection (display->userArea.reduced (20).withZeroOrigin());
+        centreWithSize (std::max (size.getWidth(), 720), std::max (size.getHeight(), 560));
         setVisible (true);
     }
 
@@ -198,6 +205,8 @@ public:
                 log_->write (LogLevel::info, "ui", "User opened the log folder");
                 juce::File (juce::String::fromUTF8 (pathToUtf8 (logDirectory()).c_str())).startAsProcess();
             },
+            [this] { copyDiagnostics(); },
+            [this] { saveDiagnostics(); },
             [this] { chooseMidiFile(); },
             [this] (const juce::File& file) {
                 log_->write (LogLevel::info, "ui", "User dropped a file on the window");
@@ -238,7 +247,10 @@ public:
         });
         content_ = content;
         content->setPixelsPerSecond (settings_.visual.pixelsPerSecond);
-        midi_->setViewListener ([content] (const ui::InputMonitorView& view) { content->setInputMonitor (view); });
+        midi_->setViewListener ([this, content] (const ui::InputMonitorView& view) {
+            lastInputView_ = view;
+            content->setInputMonitor (view);
+        });
         midi_->setChoiceListener ([this] (const midi_io::MidiDeviceInfo& device) { rememberInput (device); });
 
         window_ = std::make_unique<MainWindow> (getApplicationName() + " " + getApplicationVersion(), content, *log_);
@@ -330,6 +342,69 @@ private:
         lesson_->loadSong (song_);
         content_->setSong (std::make_shared<const ui::PianoRollView> (makePianoRollView (*song_, songTitle_)));
         log_->write (LogLevel::info, "song", "Song shown in piano roll");
+    }
+
+    std::string diagnosticReport (std::size_t logLines)
+    {
+        diagnostics::DiagnosticSummary s;
+        s.appVersion = PIANOASSIST_VERSION;
+#if JUCE_DEBUG
+        s.build = "Debug";
+#else
+        s.build = "Release";
+#endif
+        s.os = juce::SystemStats::getOperatingSystemName().toStdString();
+        s.audio = audioError_.empty() ? audio_->deviceDescription() : audioError_;
+        for (const auto& device : lastInputView_.devices)
+        {
+            s.midiInputs.push_back (device.name);
+            if (device.identifier == lastInputView_.selectedIdentifier)
+                s.selectedMidiInput = device.name;
+        }
+        s.song = song_ != nullptr ? songTitle_ : std::string();
+        const auto practice = lesson_->snapshot();
+        s.practice = std::string (practice.practising ? "on, " : "off, ") + std::string (lesson::toString (practice.mode))
+                     + ", " + settings_.practiceProfile.name + " timing"
+                     + (practice.accompaniment.playOtherPianoPart ? "" : ", other hand muted")
+                     + (practice.accompaniment.playBacking ? "" : ", backing muted");
+
+        auto lines = diagnostics::tailLines (log_->currentFile(), logLines);
+        const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory).getFullPathName().toStdString();
+        const auto user = juce::SystemStats::getLogonName().toStdString();
+        auto text = diagnostics::buildReport (s, lines);
+        return diagnostics::redact (std::move (text), { { home, "%USERPROFILE%" }, { user, "<user>" } });
+    }
+
+    void copyDiagnostics()
+    {
+        juce::SystemClipboard::copyTextToClipboard (juce::String::fromUTF8 (diagnosticReport (300).c_str()));
+        log_->write (LogLevel::info, "ui", "Diagnostics copied to the clipboard");
+        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Diagnostics copied",
+                                                "A report with the last 300 log lines is on the clipboard. "
+                                                "Your user folder name is replaced. Paste it where you need it.");
+    }
+
+    void saveDiagnostics()
+    {
+        log_->write (LogLevel::info, "ui", "User pressed Save diagnostics");
+        const auto name = "PianoAssist-diagnostics-" + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S") + ".txt";
+        chooser_ = std::make_unique<juce::FileChooser> (
+            "Save diagnostics", juce::File::getSpecialLocation (juce::File::userDesktopDirectory).getChildFile (name), "*.txt");
+        chooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                                   | juce::FileBrowserComponent::warnAboutOverwriting,
+                               [this] (const juce::FileChooser& chooser) {
+                                   const auto file = chooser.getResult();
+                                   if (file == juce::File())
+                                       return;
+                                   const auto report = diagnosticReport (20'000);
+                                   const auto path = pathFromUtf8 (file.getFullPathName().toStdString());
+                                   const auto written = writeFileAtomically (
+                                       path, std::vector<std::uint8_t> (report.begin(), report.end()));
+                                   if (! written)
+                                       log_->write (LogLevel::error, "ui", "Saving diagnostics failed", { { "error", written.error() } });
+                                   else
+                                       log_->write (LogLevel::info, "ui", "Diagnostics saved", { { "file", fileNameForLog (path) } });
+                               });
     }
 
     void reassignPart (std::size_t part, int assignment)
@@ -425,6 +500,7 @@ private:
     juce::File lastFolder_ = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
     std::shared_ptr<const timeline::Song> song_;
     std::string songTitle_;
+    ui::InputMonitorView lastInputView_;
     std::unique_ptr<AudioService> audio_;
     std::unique_ptr<LessonController> lesson_;
     std::string audioError_;

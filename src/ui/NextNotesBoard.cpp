@@ -50,7 +50,16 @@ float drawChip (juce::Graphics& g, float x, float y, float height, std::uint8_t 
 
 void NextNotesBoard::setView (const PracticeView& view)
 {
+    // Screen readers hear when the song starts waiting and what for.
+    const bool startedWaiting = view.waiting && ! view_.waiting;
     view_ = view;
+    juce::String notes;
+    for (const auto pitch : view.required)
+        notes << (notes.isEmpty() ? "" : ", ") << text (noteName (pitch));
+    setDescription (notes.isEmpty() ? juce::String() : "Play " + notes);
+    if (startedWaiting && notes.isNotEmpty())
+        if (auto* handler = getAccessibilityHandler())
+            handler->postAnnouncement ("Waiting for " + notes, juce::AccessibilityHandler::AnnouncementPriority::high);
     repaint();
 }
 

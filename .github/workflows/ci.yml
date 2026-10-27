@@ -40,11 +40,22 @@ jobs:
         run: |
           $exe = "build/windows-x64/src/app/PianoAssistApp_artefacts/${{ matrix.config }}/PianoAssist.exe"
           Compress-Archive -Path $exe -DestinationPath "PianoAssist-windows-x64-${{ matrix.config }}.zip"
+      - name: Build installer (Release, unsigned)
+        if: matrix.config == 'Release'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Null }
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $exe = Resolve-Path "build/windows-x64/src/app/PianoAssistApp_artefacts/Release/PianoAssist.exe"
+          & $iscc /Qp "/DAppVersion=$version" "/DSourceExe=$exe" "/O$PWD" installer/PianoAssist.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem PianoAssist-*-setup.exe | Rename-Item -NewName "PianoAssist-windows-x64-setup.exe"
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:
           name: PianoAssist-windows-x64-${{ matrix.config }}
-          path: PianoAssist-windows-x64-${{ matrix.config }}.zip
+          path: PianoAssist-windows-x64-*
           if-no-files-found: error
 
   test-build-release:
@@ -69,8 +80,10 @@ jobs:
           prerelease: true
           body: |
             Automatic test build from `${{ github.ref_name }}` at ${{ github.sha }}.
-            Not a release. Unzip and run PianoAssist.exe (Release is the one to test; Debug is slower and for diagnosis).
-          files: PianoAssist-windows-x64-*.zip
+            Not a release. Either run PianoAssist-windows-x64-setup.exe (per-user install, no admin rights, unsigned so Windows SmartScreen may ask "Run anyway"), or unzip and run PianoAssist.exe. Release is the one to test; Debug is slower and for diagnosis. Nothing else needs installing.
+          files: |
+            PianoAssist-windows-x64-*.zip
+            PianoAssist-windows-x64-setup.exe
 
   tests-linux:
     name: Domain tests (Linux, no JUCE)

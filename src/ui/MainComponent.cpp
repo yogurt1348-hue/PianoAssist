@@ -57,7 +57,14 @@ MainComponent::MainComponent (Intents intents)
 
     rescanButton_.onClick = [this] { if (intents_.rescanInputs) intents_.rescanInputs(); };
     addAndMakeVisible (rescanButton_);
-    logButton_.onClick = [this] { if (intents_.openLogFolder) intents_.openLogFolder(); };
+    logButton_.setTooltip ("Copy or save a diagnostic report, or open the log folder. Nothing is sent anywhere.");
+    logButton_.onClick = [this] {
+        juce::PopupMenu menu;
+        menu.addItem ("Copy diagnostics to clipboard", [this] { if (intents_.copyDiagnostics) intents_.copyDiagnostics(); });
+        menu.addItem ("Save diagnostics to a file...", [this] { if (intents_.saveDiagnostics) intents_.saveDiagnostics(); });
+        menu.addItem ("Open log folder", [this] { if (intents_.openLogFolder) intents_.openLogFolder(); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&logButton_));
+    };
     addAndMakeVisible (logButton_);
 
     statusLabel_.setFont (juce::FontOptions (14.0f));
@@ -99,7 +106,6 @@ MainComponent::MainComponent (Intents intents)
     partsHeader_.setFont (juce::FontOptions (13.0f, juce::Font::bold));
     addChildComponent (partsHeader_);
 
-    playButton_.setTooltip ("Play / Pause (Space)");
     playButton_.onClick = [this] { if (intents_.playPause) intents_.playPause(); };
     stopButton_.setTooltip ("Stop and return to the start. Notes are released and may ring out briefly.");
     stopButton_.onClick = [this] { if (intents_.stop) intents_.stop(); };
@@ -117,7 +123,6 @@ MainComponent::MainComponent (Intents intents)
                                                               &volumeLabel_, &timeLabel_, &transportNote_ })
         addAndMakeVisible (c);
 
-    practiceToggle_.setTooltip ("Playback stops at each note or chord of your hand until you play it on the piano");
     practiceToggle_.onClick = [this] { if (intents_.practiceChanged) intents_.practiceChanged (practiceToggle_.getToggleState()); };
     modeBox_.addItem ("Both hands", 1);
     modeBox_.addItem ("Right hand", 2);
@@ -142,6 +147,17 @@ MainComponent::MainComponent (Intents intents)
                                                               &backingToggle_, &gateLabel_, &board_ })
         addAndMakeVisible (c);
     setWantsKeyboardFocus (true);
+    // Tab moves through every control in reading order.
+    setFocusContainerType (juce::Component::FocusContainerType::keyboardFocusContainer);
+    inputBox_.setTitle ("MIDI input device");
+    modeBox_.setTitle ("Hand to practise");
+    toleranceBox_.setTitle ("Timing tolerance");
+    volume_.setTitle ("Volume");
+    board_.setTitle ("Notes to play next");
+    keyboard_.setTitle ("On-screen piano keyboard; click a key to hear it");
+    playButton_.setTooltip ("Play / Pause (Space)");
+    openButton_.setTooltip ("Open a MIDI file (Ctrl+O), or drag one onto the window");
+    practiceToggle_.setTooltip ("Playback stops at each note or chord of your hand until you play it (Ctrl+P)");
 
     roll_.onZoomChanged = [this] (double pps) { if (intents_.zoomChanged) intents_.zoomChanged (pps); };
     roll_.onSeekRequested = [this] (double seconds) { if (intents_.seek) intents_.seek (seconds); };
@@ -211,6 +227,27 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (key == juce::KeyPress::escapeKey && intents_.silence)
     {
         intents_.silence();
+        return true;
+    }
+    const auto ctrl = key.getModifiers().isCommandDown();
+    if (ctrl && key.getKeyCode() == 'O' && intents_.chooseMidiFile)
+    {
+        intents_.chooseMidiFile();
+        return true;
+    }
+    if (ctrl && key.getKeyCode() == 'P')
+    {
+        practiceToggle_.triggerClick();
+        return true;
+    }
+    if (ctrl && key.getKeyCode() >= '1' && key.getKeyCode() <= '3')
+    {
+        modeBox_.setSelectedId (key.getKeyCode() - '0', juce::sendNotificationSync);
+        return true;
+    }
+    if (ctrl && key.getKeyCode() == 'T')
+    {
+        toleranceBox_.setSelectedId (toleranceBox_.getSelectedId() % 3 + 1, juce::sendNotificationSync);
         return true;
     }
     return false;
@@ -410,9 +447,16 @@ void MainComponent::resized()
     practiceBar.removeFromLeft (12);
     toleranceBox_.setBounds (practiceBar.removeFromLeft (140));
     practiceBar.removeFromLeft (12);
+    // Narrow windows (for example 200% scaling on a laptop) get a second row.
+    constexpr int secondRowWidth = 140 + 120 + 200;
+    if (practiceBar.getWidth() < secondRowWidth)
+    {
+        area.removeFromTop (4);
+        practiceBar = area.removeFromTop (26);
+    }
     otherPartToggle_.setBounds (practiceBar.removeFromLeft (140));
     backingToggle_.setBounds (practiceBar.removeFromLeft (120));
-    gateLabel_.setBounds (practiceBar.removeFromRight (200));
+    gateLabel_.setBounds (practiceBar.removeFromRight (std::min (200, practiceBar.getWidth())));
 
     area.removeFromTop (6);
     keyboard_.setBounds (area.removeFromBottom (84));
