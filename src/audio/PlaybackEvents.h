@@ -33,8 +33,9 @@ struct PlaybackEventList
 };
 
 /** include decides which notes sound (by role, part...); sustain events
-    always pass. */
+    always pass. gain (0-1) scales a note's velocity; 0 leaves it out. */
 PlaybackEventList buildPlaybackEvents (const timeline::Song& song, std::uint64_t id,
-                                       const std::function<bool (const timeline::Note&)>& include = {});
+                                       const std::function<bool (const timeline::Note&)>& include = {},
+                                       const std::function<double (const timeline::Note&)>& gain = {});
 
 } // namespace pianoassist::audio

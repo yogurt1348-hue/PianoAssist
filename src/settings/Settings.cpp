@@ -136,6 +136,8 @@ std::string toJson (const Settings& s)
         { "appearance",
           { { "theme", s.appearance.theme }, { "language", s.appearance.language }, { "uiScale", s.appearance.uiScale } } },
         { "audio", { { "deviceStateXml", s.audio.deviceStateXml } } },
+        { "library", { { "root", s.library.root } } },
+        { "updates", { { "includeTestBuilds", s.updates.includeTestBuilds } } },
         { "recent", { { "files", s.recentFiles } } },
     };
     return root.dump (2);
@@ -211,6 +213,9 @@ LoadResult fromJson (std::string_view text)
     reader.read ("appearance", "uiScale", s.appearance.uiScale, [] (const double& v) { return finiteIn (v, 0.75, 2.0); });
     reader.read ("audio", "deviceStateXml", s.audio.deviceStateXml,
                  [] (const std::string& v) { return v.size() <= 16 * 1024; });
+
+    reader.read ("library", "root", s.library.root, [] (const std::string& v) { return v.size() <= 4096; });
+    reader.read ("updates", "includeTestBuilds", s.updates.includeTestBuilds);
 
     if (const auto recent = root.find ("recent"); recent != root.end() && recent->is_object())
         if (const auto files = recent->find ("files"); files != recent->end())

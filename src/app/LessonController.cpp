@@ -95,6 +95,8 @@ void LessonController::loadSong (std::shared_ptr<const timeline::Song> song, boo
 void LessonController::setAccompaniment (lesson::Accompaniment a) { post (SetAccompaniment { a }); }
 void LessonController::setMutedParts (std::vector<bool> muted) { post (SetMutedParts { std::move (muted) }); }
 void LessonController::setTempo (double rate) { post (SetTempo { rate }); }
+void LessonController::setLoop (bool enabled, double start, double end) { post (SetLoop { enabled, start, end }); }
+void LessonController::setPartGains (std::vector<double> gains) { post (SetPartGains { std::move (gains) }); }
 void LessonController::playPause() { post (PlayPause {}); }
 void LessonController::stop() { post (Stop {}); }
 void LessonController::seek (double s) { post (Seek { s }); }
@@ -120,7 +122,13 @@ void LessonController::logTransport (const char* message, const AudioService::Sn
 void LessonController::rebuild (double position, const char* why)
 {
     if (! song_)
+    {
+        // The song was closed: nothing may keep sounding or waiting.
+        audio_.stop();
+        audio_.setGate (-1.0);
+        session_.reset();
         return;
+    }
     const auto mode = mode_;
     const bool practising = practising_;
     const auto accompaniment = accompaniment_;
@@ -128,12 +136,19 @@ void LessonController::rebuild (double position, const char* why)
     // rest, as far as the accompaniment choices allow.
     const auto song = song_;
     const auto muted = mutedParts_;
-    audio_.loadSong (*song_, [song, mode, practising, accompaniment, muted] (const timeline::Note& note) {
-        const auto part = song->partIndexOf (note);
-        if (part >= 0 && static_cast<std::size_t> (part) < muted.size() && muted[static_cast<std::size_t> (part)])
-            return false;
-        return lesson::isPlayedByApp (note.role, practising, mode, accompaniment);
-    });
+    const auto gains = partGains_;
+    audio_.loadSong (
+        *song_,
+        [song, mode, practising, accompaniment, muted] (const timeline::Note& note) {
+            const auto part = song->partIndexOf (note);
+            if (part >= 0 && static_cast<std::size_t> (part) < muted.size() && muted[static_cast<std::size_t> (part)])
+                return false;
+            return lesson::isPlayedByApp (note.role, practising, mode, accompaniment);
+        },
+        [song, gains] (const timeline::Note& note) {
+            const auto part = song->partIndexOf (note);
+            return part >= 0 && static_cast<std::size_t> (part) < gains.size() ? gains[static_cast<std::size_t> (part)] : 1.0;
+        });
     if (position > 0.0)
         audio_.seek (position);
 
@@ -175,8 +190,12 @@ void LessonController::handle (const Intent& intent)
             using T = std::decay_t<decltype (i)>;
             if constexpr (std::is_same_v<T, LoadSong>)
             {
-                if (! i.keepPosition || ! song_ || song_->parts.size() != i.song->parts.size())
+                if (! i.keepPosition || ! song_ || ! i.song || song_->parts.size() != i.song->parts.size())
+                {
                     mutedParts_.clear();
+                    partGains_.clear();
+                    loop_ = { false, 0.0, 0.0 };
+                }
                 song_ = i.song;
                 if (i.keepPosition)
                     audio_.stop();
@@ -281,6 +300,23 @@ void LessonController::handle (const Intent& intent)
                             { { "percent", std::to_string (static_cast<int> (std::lround (i.rate * 100.0))) } });
                 audio_.setRate (i.rate);
             }
+            else if constexpr (std::is_same_v<T, SetLoop>)
+            {
+                loop_ = i;
+                loopJumping_ = false;
+                log_.write (LogLevel::info, "lesson", i.enabled ? "Loop set" : "Loop off",
+                            { { "from", seconds (i.start) }, { "to", seconds (i.end) } });
+            }
+            else if constexpr (std::is_same_v<T, SetPartGains>)
+            {
+                if (partGains_ == i.gains)
+                    return;
+                partGains_ = i.gains;
+                const bool wasRunning = audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate;
+                rebuild (audio.positionSeconds, "track volumes changed");
+                if (wasRunning)
+                    audio_.play();
+            }
             else if constexpr (std::is_same_v<T, PreviewKey>)
             {
                 log_.write (LogLevel::debug, "ui", i.down ? "On-screen key down" : "On-screen key up",
@@ -369,6 +405,35 @@ void LessonController::publish (const AudioService::Snapshot& audio)
     snapshot_ = std::move (snap);
 }
 
+void LessonController::checkLoop (const AudioService::Snapshot& audio)
+{
+    if (! loop_.enabled || ! song_ || loop_.end <= loop_.start)
+        return;
+    const auto now = AudioService::nowMicros();
+    if (loopJumping_)
+    {
+        // The seek reaches the audio thread a block later; wait for it.
+        if (audio.positionSeconds < loop_.end - 0.01 || now - loopJumpMicros_ > 250'000)
+            loopJumping_ = false;
+        return;
+    }
+    const bool running = audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate;
+    const bool finished = audio.state == PlaybackState::completed && lastState_ != PlaybackState::completed;
+    const bool atEnd = (running && audio.positionSeconds >= loop_.end - 1.0e-3) || (finished && loop_.end >= song_->durationSeconds - 0.05);
+    if (! atEnd)
+        return;
+    // A note of the learner's before the end still has to be played first.
+    if (session_ && audio.state == PlaybackState::waitingForGate)
+        if (const auto* gate = session_->currentGate(); gate != nullptr && gate->onsetSeconds < loop_.end)
+            return;
+    log_.write (LogLevel::info, "lesson", "Loop: back to the start", { { "to", seconds (loop_.start) } });
+    audio_.stop();
+    rebuild (loop_.start, "loop");
+    audio_.play();
+    loopJumping_ = true;
+    loopJumpMicros_ = now;
+}
+
 void LessonController::hiResTimerCallback()
 {
     std::deque<Intent> pending;
@@ -390,6 +455,7 @@ void LessonController::hiResTimerCallback()
                           { "at", seconds (session_->currentGate()->onsetSeconds) },
                           { "missing", names (session_->missingPitches()) } });
     }
+    checkLoop (audio);
     if (audio.state != lastState_)
     {
         log_.write (LogLevel::info, "transport", "Playback state changed",

@@ -98,7 +98,10 @@ void MainComponent::TrackList::resized()
         }
         else
             row.role->setBounds (boxes);
-        row.detail->setBounds (area.removeFromTop (17).withTrimmedLeft (piano ? 0 : 26));
+        auto line = area.removeFromTop (20).withTrimmedLeft (piano ? 0 : 26);
+        if (row.volume != nullptr)
+            row.volume->setBounds (line.removeFromRight (std::min (110, line.getWidth() / 2)));
+        row.detail->setBounds (line);
         area.removeFromTop (6);
     }
     pianoHeader.setVisible (pianoDone);
@@ -115,7 +118,7 @@ int MainComponent::TrackList::preferredHeight() const
         const bool isPiano = dynamic_cast<juce::Label*> (row.head.get()) != nullptr;
         if (isPiano && ! piano) { height += 22; piano = true; }
         if (! isPiano && ! other) { height += 28; other = true; }
-        height += 24 + 26 + 17 + 6;
+        height += 24 + 26 + 20 + 6;
     }
     return height;
 }
@@ -155,6 +158,10 @@ MainComponent::MainComponent (Intents intents)
     silenceButton_.setButtonText (TRANS ("Silence"));
     silenceButton_.setTooltip (TRANS ("Cut every sound at once, including notes still fading (Esc)"));
     silenceButton_.onClick = [this] { if (intents_.silence) intents_.silence(); };
+    loopButton_.setButtonText (TRANS ("Loop"));
+    loopButton_.setClickingTogglesState (false);
+    loopButton_.setTooltip (TRANS ("Repeat a range. Drag along the bar numbers above the roll to choose it (Ctrl+L)."));
+    loopButton_.onClick = [this] { toggleLoop(); };
     positionLabel_.setFont (juce::FontOptions (14.0f));
     tempoLabel_.setText (TRANS ("Tempo"), juce::dontSendNotification);
     tempoLabel_.setJustificationType (juce::Justification::centredRight);
@@ -168,7 +175,7 @@ MainComponent::MainComponent (Intents intents)
         if (tempo_ > 0 && intents_.tempoChanged)
             intents_.tempoChanged (tempo_);
     };
-    for (auto* c : std::initializer_list<juce::Component*> { &playButton_, &stopButton_, &silenceButton_, &positionLabel_,
+    for (auto* c : std::initializer_list<juce::Component*> { &playButton_, &stopButton_, &silenceButton_, &loopButton_, &positionLabel_,
                                                               &tempoLabel_, &tempoBox_ })
         addAndMakeVisible (c);
 
@@ -187,6 +194,11 @@ MainComponent::MainComponent (Intents intents)
                 intents_.zoomChanged (pps);
         };
         roll->onSeekRequested = [this] (double seconds) { if (intents_.seek) intents_.seek (seconds); };
+        roll->onLoopSelected = [this] (double start, double end) {
+            setLoop (true, start, end);
+            if (intents_.loopChanged)
+                intents_.loopChanged (true, start, end);
+        };
         addChildComponent (roll);
     }
     roll_.setTitle (TRANS ("Piano roll of your parts"));
@@ -355,6 +367,55 @@ void MainComponent::setTempo (int percent)
     tempoBox_.setSelectedId (percent, juce::dontSendNotification);
 }
 
+void MainComponent::setLoop (bool enabled, double startSeconds, double endSeconds)
+{
+    loopEnabled_ = enabled && endSeconds > startSeconds;
+    loopStart_ = startSeconds;
+    loopEnd_ = endSeconds;
+    roll_.setLoop (loopEnabled_, startSeconds, endSeconds);
+    tracksRoll_.setLoop (loopEnabled_, startSeconds, endSeconds);
+    loopButton_.setToggleState (loopEnabled_, juce::dontSendNotification);
+    loopButton_.setButtonText (loopEnabled_ ? TRANS ("Loop") + " " + juce::String::fromUTF8 ("\xe2\x9c\x93") : TRANS ("Loop"));
+    menuItemsChanged();
+}
+
+void MainComponent::toggleLoop()
+{
+    if (! song_)
+        return;
+    if (! loopEnabled_ && loopEnd_ <= loopStart_)
+    {
+        // No range yet: the current bar and the three after it.
+        const auto& bars = song_->barStarts;
+        double start = 0.0, end = std::min (song_->durationSeconds, 8.0);
+        if (! bars.empty())
+        {
+            auto it = std::upper_bound (bars.begin(), bars.end(), transport_.positionSeconds + 1.0e-6);
+            const auto index = static_cast<std::size_t> (std::max<std::ptrdiff_t> (0, (it - bars.begin()) - 1));
+            start = bars[index];
+            end = index + 4 < bars.size() ? bars[index + 4] : song_->durationSeconds;
+        }
+        loopStart_ = start;
+        loopEnd_ = end;
+    }
+    setLoop (! loopEnabled_, loopStart_, loopEnd_);
+    if (intents_.loopChanged)
+        intents_.loopChanged (loopEnabled_, loopStart_, loopEnd_);
+}
+
+void MainComponent::setTrackMix (std::vector<bool> muted, std::vector<double> volumes)
+{
+    muted_ = std::move (muted);
+    volumes_ = std::move (volumes);
+    for (auto& row : trackList_.rows)
+    {
+        if (auto* toggle = dynamic_cast<juce::ToggleButton*> (row.head.get()))
+            toggle->setToggleState (row.part >= muted_.size() || ! muted_[row.part], juce::dontSendNotification);
+        if (row.volume != nullptr)
+            row.volume->setValue (row.part < volumes_.size() ? volumes_[row.part] : 1.0, juce::dontSendNotification);
+    }
+}
+
 void MainComponent::setRecentFiles (std::vector<std::string> utf8Paths)
 {
     recent_ = std::move (utf8Paths);
@@ -518,6 +579,10 @@ void MainComponent::setSong (std::shared_ptr<const PianoRollView> song)
         }
     if (! song_ || muted_.size() != song_->parts.size())
         muted_.assign (song_ ? song_->parts.size() : 0, false);
+    if (! song_ || volumes_.size() != song_->parts.size())
+        volumes_.assign (song_ ? song_->parts.size() : 0, 1.0);
+    if (changed)
+        setLoop (false, 0.0, 0.0);
     if (changed && ! song_)
         partSounds_.clear();
     rebuildPartList();
@@ -662,7 +727,7 @@ juce::ComboBox* MainComponent::makeSoundBox (std::size_t part)
 void MainComponent::rebuildPartList()
 {
     for (auto& row : trackList_.rows)
-        for (auto* c : std::initializer_list<juce::Component*> { row.head.get(), row.role.get(), row.sound.get(), row.detail.get() })
+        for (auto* c : std::initializer_list<juce::Component*> { row.head.get(), row.role.get(), row.sound.get(), row.volume.get(), row.detail.get() })
             if (c != nullptr)
                 trackList_.removeChildComponent (c);
     trackList_.rows.clear();
@@ -680,6 +745,21 @@ void MainComponent::rebuildPartList()
             row.detail->setFont (juce::FontOptions (12.0f));
             row.detail->setColour (juce::Label::textColourId, theme::mutedText);
             row.detail->setText (toJuce (part.detail), juce::dontSendNotification);
+            row.volume = std::make_unique<juce::Slider> (juce::Slider::LinearHorizontal, juce::Slider::NoTextBox);
+            row.volume->setRange (0.0, 1.0);
+            row.volume->setValue (i < volumes_.size() ? volumes_[i] : 1.0, juce::dontSendNotification);
+            row.volume->setTitle (TRANS ("Track volume"));
+            row.volume->setTooltip (TRANS ("Volume of this track"));
+            {
+                auto* slider = row.volume.get();
+                slider->onDragEnd = [this, i, slider] {
+                    if (i >= volumes_.size())
+                        volumes_.resize (i + 1, 1.0);
+                    volumes_[i] = slider->getValue();
+                    if (intents_.partVolumeChanged)
+                        intents_.partVolumeChanged (i, slider->getValue());
+                };
+            }
             if (isPianoAssignment (part.assignment))
             {
                 auto label = std::make_unique<juce::Label>();
@@ -714,7 +794,7 @@ void MainComponent::rebuildPartList()
                 trackList_.rows.push_back (std::move (row));
     }
     for (auto& row : trackList_.rows)
-        for (auto* c : std::initializer_list<juce::Component*> { row.head.get(), row.role.get(), row.sound.get(), row.detail.get() })
+        for (auto* c : std::initializer_list<juce::Component*> { row.head.get(), row.role.get(), row.sound.get(), row.volume.get(), row.detail.get() })
             if (c != nullptr)
                 trackList_.addAndMakeVisible (c);
     tabs_.setTabName (1, backingCount > 0 ? TRANS ("Other tracks") + " (" + juce::String (backingCount) + ")" : TRANS ("Other tracks"));
@@ -794,6 +874,8 @@ void MainComponent::resized()
     stopButton_.setBounds (bar.removeFromLeft (84));
     bar.removeFromLeft (8);
     silenceButton_.setBounds (bar.removeFromLeft (104));
+    bar.removeFromLeft (8);
+    loopButton_.setBounds (bar.removeFromLeft (84));
     bar.removeFromLeft (14);
     tempoBox_.setBounds (bar.removeFromRight (96));
     tempoLabel_.setBounds (bar.removeFromRight (64));
@@ -894,6 +976,7 @@ void MainComponent::layoutSidebar (juce::Rectangle<int> area)
     tracksView_.setBounds (side);
     trackList_.setSize (side.getWidth() - (trackList_.preferredHeight() > side.getHeight() ? 10 : 0),
                         trackList_.preferredHeight());
+    trackList_.resized(); // rows may be new while the size stayed the same
     tracksButton_.setButtonText (TRANS ("Tracks and instruments") + "  " + juce::String::fromUTF8 (tracksOpen_ ? "\xe2\x96\xb4" : "\xe2\x96\xbe"));
 }
 
@@ -927,6 +1010,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         toleranceBox_.setSelectedId (toleranceBox_.getSelectedId() % 3 + 1, juce::sendNotificationSync);
     else if (code == ',' && intents_.openSettings)
         intents_.openSettings (SettingsPage::midiAndAudio);
+    else if (code == 'L')
+        toggleLoop();
     else if (code == 'W' && intents_.closeSong)
         intents_.closeSong();
     else
@@ -956,6 +1041,8 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                 recent.addItem (file.getFileName(), [this, file] { if (intents_.openMidiFile) intents_.openMidiFile (file); });
             }
             menu.addSubMenu (TRANS ("Recent files"), recent, ! recent_.empty());
+            menu.addItem (TRANS ("Open song folder"), hasSong, false, call (intents_.openSongFolder));
+            menu.addItem (TRANS ("Open library folder"), call (intents_.openLibraryFolder));
             menu.addItem (juce::PopupMenu::Item (TRANS ("Close file")).setEnabled (hasSong).setAction (call (intents_.closeSong))| shortcut ("Ctrl+W"));
             menu.addSeparator();
             menu.addItem (juce::PopupMenu::Item (TRANS ("Settings...")).setAction ([this] {
@@ -1012,6 +1099,11 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                 tempo.addItem (juce::String (percent) + "%", true, tempo_ == percent, [this, percent] { tempoBox_.setSelectedId (percent, juce::sendNotificationSync); });
             menu.addSubMenu (TRANS ("Tempo"), tempo);
             menu.addSeparator();
+            menu.addItem (juce::PopupMenu::Item (TRANS ("Loop")).setEnabled (hasSong).setTicked (loopEnabled_).setAction ([this] { toggleLoop(); }) | shortcut ("Ctrl+L"));
+            menu.addItem (TRANS ("Clear loop"), hasSong && loopEnd_ > loopStart_, false, [this] {
+                setLoop (false, 0.0, 0.0);
+                if (intents_.loopChanged) intents_.loopChanged (false, 0.0, 0.0); });
+            menu.addSeparator();
             menu.addItem (TRANS ("Play other hand"), practice_.mode != 0, practice_.playOtherPart, [this] { otherPartToggle_.triggerClick(); });
             menu.addItem (TRANS ("Play other tracks"), true, practice_.playBacking, [this] { backingToggle_.triggerClick(); });
             menu.addSeparator();
@@ -1026,6 +1118,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
             menu.addItem (TRANS ("Save diagnostic report..."), call (intents_.saveDiagnostics));
             menu.addItem (TRANS ("Open log folder"), call (intents_.openLogFolder));
             menu.addSeparator();
+            menu.addItem (TRANS ("Check for updates..."), call (intents_.checkForUpdates));
             menu.addItem (TRANS ("About PianoAssist"), call (intents_.showAbout));
             break;
         }

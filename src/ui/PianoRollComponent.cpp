@@ -144,6 +144,12 @@ void PianoRollComponent::paint (juce::Graphics& g)
         const auto ruler = juce::Rectangle<int> (area.getX(), 0, area.getWidth(), rulerHeight);
         g.saveState();
         g.reduceClipRegion (ruler);
+        if (loopEnabled_ && loopEnd_ > loopStart_)
+        {
+            const float x1 = xForSeconds (loopStart_), x2 = xForSeconds (loopEnd_);
+            g.setColour (theme::accent.withAlpha (0.35f));
+            g.fillRoundedRectangle (juce::Rectangle<float> (x1, 3.0f, x2 - x1, static_cast<float> (rulerHeight - 6)), 4.0f);
+        }
         g.setFont (juce::FontOptions (12.0f));
         g.setColour (theme::mutedText);
         int every = 1;
@@ -186,6 +192,15 @@ void PianoRollComponent::paint (juce::Graphics& g)
         g.setColour (colour);
         g.fillRoundedRectangle (rect, std::min (3.0f, row / 3.0f));
     }
+    if (loopEnabled_ && loopEnd_ > loopStart_)
+    {
+        const float x1 = xForSeconds (loopStart_), x2 = xForSeconds (loopEnd_);
+        g.setColour (theme::accent.withAlpha (0.08f));
+        g.fillRect (juce::Rectangle<float> (x1, static_cast<float> (area.getY()), x2 - x1, static_cast<float> (area.getHeight())));
+        g.setColour (theme::accent.withAlpha (0.6f));
+        g.drawVerticalLine (static_cast<int> (x1), static_cast<float> (area.getY()), static_cast<float> (area.getBottom()));
+        g.drawVerticalLine (static_cast<int> (x2), static_cast<float> (area.getY()), static_cast<float> (area.getBottom()));
+    }
     const float playheadX = xForSeconds (playheadSeconds_);
     g.setColour (theme::playhead);
     g.fillRect (juce::Rectangle<float> (playheadX - 1.0f, static_cast<float> (area.getY()), 2.0f, static_cast<float> (area.getHeight())));
@@ -209,13 +224,69 @@ void PianoRollComponent::setPlayhead (double seconds, bool follow)
     repaint (rollArea());
 }
 
+double PianoRollComponent::secondsAt (float x) const
+{
+    const double seconds = viewStartSeconds_ + (static_cast<double> (x) - rollArea().getX()) / pixelsPerSecond_;
+    return std::clamp (seconds, 0.0, view_ != nullptr ? view_->durationSeconds : 0.0);
+}
+
+double PianoRollComponent::snapToBar (double seconds) const
+{
+    if (view_ == nullptr || view_->barStarts.empty())
+        return seconds;
+    double best = view_->durationSeconds;
+    for (const double bar : view_->barStarts)
+        if (std::abs (bar - seconds) < std::abs (best - seconds))
+            best = bar;
+    return best;
+}
+
+void PianoRollComponent::setLoop (bool enabled, double startSeconds, double endSeconds)
+{
+    loopEnabled_ = enabled;
+    loopStart_ = startSeconds;
+    loopEnd_ = endSeconds;
+    repaint();
+}
+
 void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
 {
     const auto clickable = rollArea().withTop (0);
-    if (view_ == nullptr || ! clickable.contains (e.getPosition()) || ! onSeekRequested)
+    draggingLoop_ = false;
+    if (view_ == nullptr || ! clickable.contains (e.getPosition()))
         return;
-    const double seconds = viewStartSeconds_ + (static_cast<double> (e.position.x) - rollArea().getX()) / pixelsPerSecond_;
-    onSeekRequested (std::clamp (seconds, 0.0, view_->durationSeconds));
+    dragAnchor_ = secondsAt (e.position.x);
+    if (e.position.y < static_cast<float> (rulerHeight))
+        return; // the ruler: a click seeks on mouse up, a drag selects a loop
+    if (onSeekRequested)
+        onSeekRequested (dragAnchor_);
+}
+
+void PianoRollComponent::mouseDrag (const juce::MouseEvent& e)
+{
+    if (view_ == nullptr || e.mouseDownPosition.y >= static_cast<float> (rulerHeight) || e.getDistanceFromDragStartX() == 0)
+        return;
+    if (std::abs (e.getDistanceFromDragStartX()) < 6 && ! draggingLoop_)
+        return;
+    draggingLoop_ = true;
+    const auto a = snapToBar (dragAnchor_);
+    const auto b = snapToBar (secondsAt (e.position.x));
+    setLoop (true, std::min (a, b), std::max (a, b));
+}
+
+void PianoRollComponent::mouseUp (const juce::MouseEvent& e)
+{
+    if (view_ == nullptr || e.mouseDownPosition.y >= static_cast<float> (rulerHeight))
+        return;
+    if (draggingLoop_)
+    {
+        draggingLoop_ = false;
+        if (loopEnd_ - loopStart_ > 0.05 && onLoopSelected)
+            onLoopSelected (loopStart_, loopEnd_);
+        return;
+    }
+    if (onSeekRequested && rollArea().withTop (0).contains (e.getPosition()))
+        onSeekRequested (dragAnchor_);
 }
 
 void PianoRollComponent::resized()

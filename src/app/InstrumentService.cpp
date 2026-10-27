@@ -20,13 +20,13 @@ juce::File toFile (const std::filesystem::path& path)
     return juce::File (juce::String::fromUTF8 (pathToUtf8 (path).c_str()));
 }
 
-juce::File knownListFile() { return toFile (userDataDirectory() / "plugins.xml"); }
+juce::File knownListFile() { return toFile (dataDirectory() / "plugins.xml"); }
 
 /** One file per plug-in, so switching between several keeps each one's sounds. */
 std::filesystem::path stateFile (const std::string& pluginId)
 {
     const auto hash = juce::String::toHexString (static_cast<juce::int64> (std::hash<std::string> {} (pluginId)));
-    return userDataDirectory() / pathFromUtf8 ("instrument-" + hash.toStdString() + ".state");
+    return dataDirectory() / pathFromUtf8 ("instrument-" + hash.toStdString() + ".state");
 }
 
 juce::String text (const std::string& utf8) { return juce::String::fromUTF8 (utf8.c_str()); }

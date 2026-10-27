@@ -57,6 +57,7 @@ public:
         std::function<void()> silence;
         std::function<void (double seconds)> seek;
         std::function<void (int percent)> tempoChanged;
+        std::function<void (bool enabled, double startSeconds, double endSeconds)> loopChanged;
         std::function<void (float gain)> volumeChanged;
         std::function<void (double pixelsPerSecond)> zoomChanged;
 
@@ -67,6 +68,10 @@ public:
         std::function<void (bool play)> playBackingChanged;
         std::function<void (std::size_t part, int assignment)> partAssignmentChanged;
         std::function<void (std::size_t part, bool muted)> partMuteChanged;
+        std::function<void (std::size_t part, double volume)> partVolumeChanged;
+        std::function<void()> openSongFolder;
+        std::function<void()> openLibraryFolder;
+        std::function<void()> checkForUpdates;
         std::function<void (std::size_t part, int soundId)> partSoundChanged; ///< SoundView ids; 0 = default sound
         std::function<void (std::uint8_t pitch, bool down)> keyClicked;
 
@@ -94,6 +99,9 @@ public:
     void setSound (const SoundView& view);
     void setVolume (float gain) { volume_.setValue (gain, juce::dontSendNotification); }
     void setTempo (int percent);
+    void setLoop (bool enabled, double startSeconds, double endSeconds);
+    /** Per-track volume and mute as saved for the song. */
+    void setTrackMix (std::vector<bool> muted, std::vector<double> volumes);
     void setRecentFiles (std::vector<std::string> utf8Paths);
     /** Per-part sound choice shown in the tracks list (SoundView ids, 0 = default). */
     void setPartSounds (std::vector<int> soundIds);
@@ -122,6 +130,7 @@ private:
         std::unique_ptr<juce::Component> head; ///< label (piano part) or play toggle (other track)
         std::unique_ptr<juce::ComboBox> role;
         std::unique_ptr<juce::ComboBox> sound;
+        std::unique_ptr<juce::Slider> volume;
         std::unique_ptr<juce::Label> detail;
     };
 
@@ -160,6 +169,10 @@ private:
     SoundView sound_;
     std::vector<int> partSounds_;
     std::vector<bool> muted_;
+    std::vector<double> volumes_;
+    bool loopEnabled_ = false;
+    double loopStart_ = 0.0, loopEnd_ = 0.0;
+    void toggleLoop();
     std::vector<std::string> recent_;
     juce::String loadingName_;
     juce::String error_;
@@ -179,6 +192,7 @@ private:
     juce::Label title_;
     juce::Label notices_;
     juce::TextButton playButton_, stopButton_, silenceButton_;
+    juce::TextButton loopButton_;
     juce::Label positionLabel_;
     juce::Label tempoLabel_;
     juce::ComboBox tempoBox_;

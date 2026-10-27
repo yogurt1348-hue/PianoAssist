@@ -28,11 +28,16 @@ public:
 
     std::function<void (double pixelsPerSecond)> onZoomChanged;
     std::function<void (double seconds)> onSeekRequested;
+    /** Dragging along the bar numbers selects a loop (snapped to bars). */
+    std::function<void (double startSeconds, double endSeconds)> onLoopSelected;
+    void setLoop (bool enabled, double startSeconds, double endSeconds);
 
     void paint (juce::Graphics& g) override;
     void resized() override;
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
     void mouseDown (const juce::MouseEvent& e) override;
+    void mouseDrag (const juce::MouseEvent& e) override;
+    void mouseUp (const juce::MouseEvent& e) override;
 
 private:
     static constexpr int gutterWidth = 44;
@@ -52,6 +57,12 @@ private:
     double pixelsPerSecond_ = 120.0;
     double viewStartSeconds_ = 0.0;
     double playheadSeconds_ = 0.0;
+    bool loopEnabled_ = false;
+    double loopStart_ = 0.0, loopEnd_ = 0.0;
+    bool draggingLoop_ = false;
+    double dragAnchor_ = 0.0;
+    double secondsAt (float x) const;
+    double snapToBar (double seconds) const;
     int lowPitch_ = 48;
     int highPitch_ = 84;
     juce::ScrollBar scrollBar_ { false };

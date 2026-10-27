@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master, "claude/**"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -19,8 +20,22 @@ jobs:
         config: [Debug, Release]
     steps:
       - uses: actions/checkout@v4
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)' | Select-Object -First 1).Matches[0].Groups[1].Value
+          # A tag vX.Y.Z is a stable build (build number 0) and must match CMakeLists.txt.
+          if ("${{ github.ref_type }}" -eq "tag") {
+            if ("${{ github.ref_name }}" -ne "v$version") { Write-Error "Tag ${{ github.ref_name }} does not match version $version"; exit 1 }
+            $build = 0
+          } else {
+            $build = ${{ github.run_number }}
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "build=$build" >> $env:GITHUB_OUTPUT
       - name: Configure
-        run: cmake --preset windows-x64
+        run: cmake --preset windows-x64 -DPIANOASSIST_BUILD_NUMBER=${{ steps.version.outputs.build }} -DPIANOASSIST_COMMIT=${{ github.sha }}
       - name: Build
         run: cmake --build --preset windows-x64-${{ matrix.config == 'Debug' && 'debug' || 'release' }} --parallel
       - name: Test
@@ -35,33 +50,48 @@ jobs:
           $deps | ForEach-Object { Write-Host "  $_" }
           $runtime = $deps | Where-Object { $_ -match '^(vcruntime|msvcp|ucrtbase|api-ms-win-crt)' }
           if ($runtime) { Write-Error "PianoAssist.exe depends on runtime DLLs: $runtime"; exit 1 }
-      - name: Package app
+      - name: Smoke test the plug-in scan helper
         shell: pwsh
         run: |
+          # The helper mode must start and fail cleanly on a file that is not a plug-in.
           $exe = "build/windows-x64/src/app/PianoAssistApp_artefacts/${{ matrix.config }}/PianoAssist.exe"
-          Compress-Archive -Path $exe -DestinationPath "PianoAssist-windows-x64-${{ matrix.config }}.zip"
-      - name: Build installer (Release, unsigned)
+          $out = Join-Path $env:RUNNER_TEMP "scan.xml"
+          $p = Start-Process -FilePath $exe -ArgumentList "--scan-plugin", "`"$PWD\README.md`"", "`"$out`"" -PassThru -Wait
+          Write-Host "Helper exit code: $($p.ExitCode)"
+          if ($p.ExitCode -gt 3) { Write-Error "Scan helper crashed"; exit 1 }
+      - name: Package Debug exe
+        if: matrix.config == 'Debug'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "build/windows-x64/src/app/PianoAssistApp_artefacts/Debug/PianoAssist.exe" `
+            -DestinationPath "dist/PianoAssist-${{ steps.version.outputs.version }}-windows-x64-debug.zip"
+      - name: Package installer and portable ZIP (Release)
         if: matrix.config == 'Release'
         shell: pwsh
+        env:
+          # Optional; when unset the build is unsigned. Never stored in the repository.
+          SIGN_CERT_PFX_BASE64: ${{ secrets.SIGN_CERT_PFX_BASE64 }}
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+          SIGN_TIMESTAMP_URL: ${{ secrets.SIGN_TIMESTAMP_URL }}
         run: |
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y | Out-Null }
-          $version = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)' | Select-Object -First 1).Matches[0].Groups[1].Value
-          $exe = Resolve-Path "build/windows-x64/src/app/PianoAssistApp_artefacts/Release/PianoAssist.exe"
-          & $iscc /Qp "/DAppVersion=$version" "/DSourceExe=$exe" "/O$PWD" installer/PianoAssist.iss
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Get-ChildItem PianoAssist-*-setup.exe | Rename-Item -NewName "PianoAssist-windows-x64-setup.exe"
-      - name: Upload app
+          ./installer/package.ps1 -Exe "build/windows-x64/src/app/PianoAssistApp_artefacts/Release/PianoAssist.exe" `
+            -Version "${{ steps.version.outputs.version }}" -OutDir dist
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: PianoAssist-windows-x64-${{ matrix.config }}
-          path: PianoAssist-windows-x64-*
+          path: |
+            dist/*.zip
+            dist/*.exe
+            dist/SHA256SUMS.txt
+            dist/windows-checks.txt
           if-no-files-found: error
 
   test-build-release:
     name: Publish test build (pre-release)
-    # Only for pushes to work branches: gives a direct download link for
-    # manual testing on Windows. Never marked as a real release.
+    # Pushes to work branches give a direct download link for manual testing
+    # on Windows. Always a pre-release, never called stable.
     if: github.event_name == 'push' && startsWith(github.ref_name, 'claude/')
     needs: windows
     runs-on: ubuntu-24.04
@@ -72,18 +102,39 @@ jobs:
         with:
           pattern: PianoAssist-windows-x64-*
           merge-multiple: true
+      - name: Release notes
+        run: |
+          version=$(ls PianoAssist-*-windows-x64-setup.exe | sed -E 's/PianoAssist-(.*)-windows-x64-setup.exe/\1/')
+          {
+            echo "Test build ${{ github.run_number }} of PianoAssist $version, from \`${{ github.ref_name }}\` at ${{ github.sha }}."
+            echo
+            echo "Not a stable release: real piano checks are still pending."
+            echo
+            echo "- PianoAssist-$version-windows-x64-setup.exe: installs for this user only (no admin rights). Updates an earlier install in place and keeps settings and songs."
+            echo "- PianoAssist-$version-windows-x64-portable.zip: unzip into a writable folder and run PianoAssist.exe; data stays in Data next to it. See README.txt inside."
+            echo "- PianoAssist-$version-windows-x64-debug.zip: slower, for diagnosis only."
+            echo
+            echo "The files are not code-signed yet, so Windows SmartScreen may warn. Compare SHA-256 before running:"
+            echo
+            echo '```'
+            cat SHA256SUMS.txt
+            echo '```'
+            echo
+            echo "Defender and signature status on the build machine: windows-checks.txt."
+          } > notes.md
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: test-build-${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           name: Test build ${{ github.run_number }} (${{ github.ref_name }})
           prerelease: true
-          body: |
-            Automatic test build from `${{ github.ref_name }}` at ${{ github.sha }}.
-            Not a release. Either run PianoAssist-windows-x64-setup.exe (per-user install, no admin rights, unsigned so Windows SmartScreen may ask "Run anyway"), or unzip and run PianoAssist.exe. Release is the one to test; Debug is slower and for diagnosis. Nothing else needs installing.
+          body_path: notes.md
           files: |
-            PianoAssist-windows-x64-*.zip
-            PianoAssist-windows-x64-setup.exe
+            PianoAssist-*-windows-x64-setup.exe
+            PianoAssist-*-windows-x64-portable.zip
+            PianoAssist-*-windows-x64-debug.zip
+            SHA256SUMS.txt
+            windows-checks.txt
 
   tests-linux:
     name: Domain tests (Linux, no JUCE)

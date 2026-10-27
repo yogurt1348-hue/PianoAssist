@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(PianoAssist
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Note-gated MIDI piano practice player"
     LANGUAGES C CXX)
 

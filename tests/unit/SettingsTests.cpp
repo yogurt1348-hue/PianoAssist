@@ -37,6 +37,8 @@ Settings customSettings()
     s.appearance = { "light", "en", 1.25 };
     s.audio.deviceStateXml = "<DEVICESETUP deviceType=\"Windows Audio\"/>";
     s.recentFiles = { "C:\\Music\\Прелюдия.mid", "D:\\song.mid" };
+    s.library.root = "D:\\Ноты\\Songs";
+    s.updates.includeTestBuilds = true;
     return s;
 }
 } // namespace

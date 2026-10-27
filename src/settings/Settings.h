@@ -79,6 +79,21 @@ struct AudioSettings
     friend bool operator== (const AudioSettings&, const AudioSettings&) = default;
 };
 
+/** Where songs are kept; empty means Songs/ in the data folder. */
+struct LibrarySettings
+{
+    std::string root; ///< UTF-8; relative paths are relative to the data folder (portable copies)
+
+    friend bool operator== (const LibrarySettings&, const LibrarySettings&) = default;
+};
+
+struct UpdateSettings
+{
+    bool includeTestBuilds = false; ///< also offer test-build-N pre-releases
+
+    friend bool operator== (const UpdateSettings&, const UpdateSettings&) = default;
+};
+
 inline constexpr std::size_t maxRecentFiles = 8;
 
 struct Settings
@@ -91,6 +106,8 @@ struct Settings
     SoundSettings sound;
     AppearanceSettings appearance;
     AudioSettings audio;
+    LibrarySettings library;
+    UpdateSettings updates;
     std::vector<std::string> recentFiles; ///< UTF-8 paths, newest first
 
     friend bool operator== (const Settings&, const Settings&) = default;

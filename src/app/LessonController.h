@@ -72,6 +72,10 @@ public:
     void setMutedParts (std::vector<bool> muted);
     /** Tempo as song seconds per real second (0.25-2.0); keeps the position. */
     void setTempo (double rate);
+    /** Practise a range again and again; disabled = play through. */
+    void setLoop (bool enabled, double startSeconds, double endSeconds);
+    /** Per-part volume 0-1 (scales velocities); 0 silences the part. */
+    void setPartGains (std::vector<double> gains);
     void previewKey (std::uint8_t pitch, bool down); ///< a click on the on-screen keyboard
 
     PracticeSnapshot snapshot() const;
@@ -89,12 +93,16 @@ private:
     struct SetMutedParts { std::vector<bool> muted; };
     struct PreviewKey { std::uint8_t pitch; bool down; };
     struct SetTempo { double rate; };
-    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, SetAccompaniment, SetMutedParts, PreviewKey, SetTempo>;
+    struct SetLoop { bool enabled; double start; double end; };
+    struct SetPartGains { std::vector<double> gains; };
+    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, SetAccompaniment,
+                                SetMutedParts, PreviewKey, SetTempo, SetLoop, SetPartGains>;
 
     void post (Intent intent);
     void hiResTimerCallback() override;
     void handle (const Intent& intent);
     void rebuild (double position, const char* why);
+    void checkLoop (const AudioService::Snapshot& audio);
     void resetGates (double position);
     void sendGate();
     void handleInput (const midi_io::InputEvent& event, const AudioService::Snapshot& audio);
@@ -116,6 +124,10 @@ private:
     lesson::PracticeMode mode_ = lesson::PracticeMode::bothHands;
     lesson::Accompaniment accompaniment_;
     std::vector<bool> mutedParts_;
+    std::vector<double> partGains_;
+    SetLoop loop_ { false, 0.0, 0.0 };
+    bool loopJumping_ = false;
+    std::int64_t loopJumpMicros_ = 0;
     std::optional<lesson::PracticeSession> session_;
     std::vector<GateHands> hands_; ///< parallel to the session's gates
     std::uint64_t seenArrivals_ = 0;

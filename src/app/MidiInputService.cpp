@@ -9,6 +9,15 @@ namespace pianoassist::app
 {
 namespace
 {
+/** Translated status text; %1 is replaced by the device name. */
+std::string tr (const char* text, const std::string& name = {})
+{
+    return TRANS (text).replace ("%1", juce::String::fromUTF8 (name.c_str())).toStdString();
+}
+} // namespace
+
+namespace
+{
 using diagnostics::LogLevel;
 using midi_io::InputEventType;
 
@@ -264,34 +273,34 @@ void MidiInputService::publishView()
     if (input_ != nullptr)
     {
         view.status = Status::connected;
-        view.statusText = "Connected: " + openDevice_.name + ". Press keys to test.";
+        view.statusText = tr ("Connected: %1. Press keys to test.", openDevice_.name);
     }
     else if (openFailed_)
     {
         view.status = Status::openFailed;
-        view.statusText = "Could not open " + openDevice_.name + ".";
-        view.bannerText = "Another program may be using the piano. Close it, then press Rescan.";
+        view.statusText = tr ("Could not open %1.", openDevice_.name);
+        view.bannerText = tr ("Another program may be using the piano. Close it, then press Rescan.");
     }
     else if (deviceLost_)
     {
         view.status = Status::lost;
-        view.statusText = "Waiting for " + openDevice_.name + " to come back...";
-        view.bannerText = "Piano disconnected. Reconnect the USB cable; it will be picked up automatically.";
+        view.statusText = tr ("Waiting for %1 to come back...", openDevice_.name);
+        view.bannerText = tr ("Piano disconnected. Reconnect the USB cable; it will be picked up automatically.");
     }
     else if (devices_.empty())
     {
         view.status = Status::noDevices;
-        view.statusText = "Windows reports no MIDI inputs. Turn the piano on and connect USB TO HOST.";
+        view.statusText = tr ("Windows reports no MIDI inputs. Turn the piano on and connect USB TO HOST.");
     }
     else if (! remembered_.name.empty())
     {
         view.status = Status::waiting;
-        view.statusText = "Waiting for " + remembered_.name + ", or choose another input.";
+        view.statusText = tr ("Waiting for %1, or choose another input.", remembered_.name);
     }
     else
     {
         view.status = Status::notSelected;
-        view.statusText = "Choose your piano.";
+        view.statusText = tr ("Choose your piano.");
     }
 
     if (const auto& last = monitor_.lastNote())

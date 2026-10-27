@@ -291,3 +291,16 @@ TEST_CASE ("Tempo slows the song without moving the played position")
     send (engine, renderer, PlaybackCommand::Type::setRate, 0.0);
     CHECK (engine.rate() == Approx (PlaybackEngine::minRate));
 }
+
+TEST_CASE ("Track volume scales velocities and zero leaves notes out")
+{
+    auto file = smf::readSmf (test::readFixture ("format0_c_major_scale_120bpm.mid"));
+    REQUIRE (file.isOk());
+    auto song = timeline::buildSong (file.value());
+    REQUIRE (song.isOk());
+    const auto half = buildPlaybackEvents (song.value(), 1, {}, [] (const timeline::Note&) { return 0.5; });
+    REQUIRE (half.events.size() == 16);
+    CHECK (half.events[0].data2 == 45); // 90 * 0.5
+    const auto none = buildPlaybackEvents (song.value(), 2, {}, [] (const timeline::Note&) { return 0.0; });
+    CHECK (none.events.empty());
+}

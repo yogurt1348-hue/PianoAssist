@@ -1,0 +1,16 @@
+PianoAssist uses the following third-party software. Their licence texts are
+in this folder.
+
+JUCE 8 (https://juce.com) - JUCE-LICENSE.md
+  Licence choice for public distribution (AGPLv3 or a JUCE commercial/
+  personal licence) is still to be decided by the project owner before
+  public distribution. Test builds are not a public release.
+
+TinySoundFont (https://github.com/schellingb/TinySoundFont) - MIT, TinySoundFont-LICENSE.txt
+
+nlohmann/json (https://github.com/nlohmann/json) - MIT, nlohmann-json-LICENSE.txt
+
+PianoAssist contains no VST3 plug-ins and no SoundFont files. Instruments the
+user adds are their own and stay under their own licences.
+
+VST is a registered trademark of Steinberg Media Technologies GmbH.
