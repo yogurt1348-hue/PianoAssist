@@ -92,6 +92,7 @@ void LessonController::loadSong (std::shared_ptr<const timeline::Song> song, boo
     post (LoadSong { std::move (song), keepPosition });
 }
 void LessonController::setAccompaniment (lesson::Accompaniment a) { post (SetAccompaniment { a }); }
+void LessonController::setMutedParts (std::vector<bool> muted) { post (SetMutedParts { std::move (muted) }); }
 void LessonController::playPause() { post (PlayPause {}); }
 void LessonController::stop() { post (Stop {}); }
 void LessonController::seek (double s) { post (Seek { s }); }
@@ -123,8 +124,13 @@ void LessonController::rebuild (double position, const char* why)
     const auto accompaniment = accompaniment_;
     // The learner plays the practised hands on the piano; the app plays the
     // rest, as far as the accompaniment choices allow.
-    audio_.loadSong (*song_, [mode, practising, accompaniment] (timeline::NoteRole role) {
-        return lesson::isPlayedByApp (role, practising, mode, accompaniment);
+    const auto song = song_;
+    const auto muted = mutedParts_;
+    audio_.loadSong (*song_, [song, mode, practising, accompaniment, muted] (const timeline::Note& note) {
+        const auto part = song->partIndexOf (note);
+        if (part >= 0 && static_cast<std::size_t> (part) < muted.size() && muted[static_cast<std::size_t> (part)])
+            return false;
+        return lesson::isPlayedByApp (note.role, practising, mode, accompaniment);
     });
     if (position > 0.0)
         audio_.seek (position);
@@ -167,6 +173,8 @@ void LessonController::handle (const Intent& intent)
             using T = std::decay_t<decltype (i)>;
             if constexpr (std::is_same_v<T, LoadSong>)
             {
+                if (! i.keepPosition || ! song_ || song_->parts.size() != i.song->parts.size())
+                    mutedParts_.clear();
                 song_ = i.song;
                 if (i.keepPosition)
                     audio_.stop();
@@ -251,6 +259,19 @@ void LessonController::handle (const Intent& intent)
                               { "playBacking", accompaniment_.playBacking ? "yes" : "no" } });
                 audio_.stop();
                 rebuild (audio.positionSeconds, "accompaniment changed");
+            }
+            else if constexpr (std::is_same_v<T, SetMutedParts>)
+            {
+                if (mutedParts_ == i.muted)
+                    return;
+                mutedParts_ = i.muted;
+                log_.write (LogLevel::info, "lesson", "Track mutes changed",
+                            { { "muted", std::to_string (std::count (mutedParts_.begin(), mutedParts_.end(), true)) } });
+                // Keeps playing from where it was; only the event list changes.
+                const bool wasRunning = audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate;
+                rebuild (audio.positionSeconds, "track mutes changed");
+                if (wasRunning)
+                    audio_.play();
             }
             else if constexpr (std::is_same_v<T, PreviewKey>)
             {

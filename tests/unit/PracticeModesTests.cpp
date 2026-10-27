@@ -170,3 +170,15 @@ TEST_CASE ("Switching mode resets gate state predictably")
     CHECK (left.matchedPitches().empty());
     CHECK (left.passedGateCount() == 0);
 }
+
+#include "timeline/GmInstruments.h"
+
+TEST_CASE ("General MIDI names for the other-tracks tab")
+{
+    CHECK (timeline::gmProgramName (0) == "Acoustic Grand Piano");
+    CHECK (timeline::gmProgramName (33) == "Electric Bass (finger)");
+    CHECK (timeline::gmProgramName (48) == "String Ensemble 1");
+    CHECK (timeline::gmProgramName (127) == "Gunshot");
+    CHECK (timeline::gmProgramName (-1) == "Piano (no program)");
+    CHECK (timeline::gmProgramName (5, true) == "Drums");
+}

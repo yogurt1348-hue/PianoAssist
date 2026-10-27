@@ -45,7 +45,7 @@ public:
 
     /** Plays only notes whose role passes the filter (practised hands are
         played by the learner). Stops playback and returns to 0. */
-    void loadSong (const timeline::Song& song, const std::function<bool (timeline::NoteRole)>& include);
+    void loadSong (const timeline::Song& song, const std::function<bool (const timeline::Note&)>& include);
     void setGate (double boundarySeconds); ///< negative clears
     void previewKey (std::uint8_t pitch, bool down);
     void play();

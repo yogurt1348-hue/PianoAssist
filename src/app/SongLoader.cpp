@@ -4,6 +4,7 @@
 #include "core/NoteName.h"
 #include "core/Utf8Path.h"
 #include "smf/SmfReader.h"
+#include "timeline/GmInstruments.h"
 
 #include <chrono>
 #include <cmath>
@@ -164,7 +165,9 @@ ui::PianoRollView makePianoRollView (const timeline::Song& song, const std::stri
                                 partRollRole (part.assignment),
                                 roleText (part.assignment),
                                 static_cast<int> (part.assignment),
-                                part.guessedFromPitch });
+                                part.guessedFromPitch,
+                                std::string (timeline::gmProgramName (part.program, part.channel == 9)),
+                                part.noteCount });
     view.needsPartCheck = timeline::needsPartCheck (song);
     return view;
 }

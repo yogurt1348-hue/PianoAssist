@@ -18,7 +18,7 @@ int orderAtSameTime (std::uint8_t status, std::uint8_t data2)
 } // namespace
 
 PlaybackEventList buildPlaybackEvents (const timeline::Song& song, std::uint64_t id,
-                                       const std::function<bool (timeline::NoteRole)>& includeRole)
+                                       const std::function<bool (const timeline::Note&)>& include)
 {
     PlaybackEventList list;
     list.id = id;
@@ -27,7 +27,7 @@ PlaybackEventList buildPlaybackEvents (const timeline::Song& song, std::uint64_t
 
     for (const auto& note : song.timeline.notes())
     {
-        if (includeRole && ! includeRole (note.role))
+        if (include && ! include (note))
             continue;
         const auto channel = static_cast<std::uint8_t> (note.channel & 0x0F);
         list.events.push_back ({ note.startSeconds, static_cast<std::uint8_t> (0x90u | channel), note.pitch,

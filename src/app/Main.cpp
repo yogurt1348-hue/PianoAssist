@@ -10,6 +10,7 @@
 #include "diagnostics/RotatingLog.h"
 #include "diagnostics/SessionReport.h"
 #include "settings/Settings.h"
+#include "ui/AppLookAndFeel.h"
 #include "ui/MainComponent.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -193,6 +194,7 @@ public:
         settings_ = loadSettings (*log_);
         diagnostics::logSessionStart (*log_, describeSession (settings_));
 
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel_);
         midi_ = std::make_unique<MidiInputService> (
             *log_, MidiInputService::Remembered { settings_.midiInput.deviceId, settings_.midiInput.lastSeenName });
 
@@ -213,8 +215,13 @@ public:
                 log_->write (LogLevel::info, "ui", "User dropped a file on the window");
                 openSong (file);
             },
-            [this] (std::size_t part, bool visible) {
-                log_->write (LogLevel::info, "ui", visible ? "Part shown" : "Part hidden", { { "part", std::to_string (part + 1) } });
+            [this] (std::size_t part, bool muted) {
+                if (song_ == nullptr || part >= song_->parts.size())
+                    return;
+                mutedParts_.resize (song_->parts.size(), false);
+                mutedParts_[part] = muted;
+                log_->write (LogLevel::info, "ui", muted ? "Track muted" : "Track unmuted", { { "part", std::to_string (part + 1) } });
+                lesson_->setMutedParts (mutedParts_);
             },
             [this] (double pixelsPerSecond) { settings_.visual.pixelsPerSecond = pixelsPerSecond; },
             [this] { lesson_->playPause(); },
@@ -312,6 +319,7 @@ public:
         audio_.reset();
         midi_.reset();
         window_.reset();
+        juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
         if (log_ != nullptr)
             log_->write (LogLevel::info, "session", "Session ended");
         crashLog = nullptr;
@@ -358,6 +366,7 @@ private:
             return;
         }
         song_ = std::move (song).value();
+        mutedParts_.clear(); // the controller clears its own copy on a new song
         songTitle_ = file.getFileNameWithoutExtension().toStdString();
         lesson_->loadSong (song_);
         content_->setSong (std::make_shared<const ui::PianoRollView> (makePianoRollView (*song_, songTitle_)));
@@ -538,6 +547,7 @@ private:
         return true;
     }
 
+    ui::AppLookAndFeel lookAndFeel_; // outlives every component
     std::unique_ptr<diagnostics::RotatingLog> log_;
     settings::Settings settings_;
     std::unique_ptr<MidiInputService> midi_;
@@ -547,6 +557,7 @@ private:
     juce::File lastFolder_ = juce::File::getSpecialLocation (juce::File::userMusicDirectory);
     std::shared_ptr<const timeline::Song> song_;
     std::string songTitle_;
+    std::vector<bool> mutedParts_; ///< "Other tracks" the user switched off
     ui::InputMonitorView lastInputView_;
     std::unique_ptr<AudioService> audio_;
     std::unique_ptr<LessonController> lesson_;

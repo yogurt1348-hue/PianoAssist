@@ -20,7 +20,7 @@ namespace pianoassist::ui
 
 /** Main window content: input bar, input monitor, song bar, part list,
     piano roll and keyboard. Draws view models and posts user intents only. */
-class MainComponent final : public juce::Component, public juce::FileDragAndDropTarget
+class MainComponent final : public juce::Component, public juce::FileDragAndDropTarget, private juce::ChangeListener
 {
 public:
     struct Intents
@@ -32,7 +32,7 @@ public:
         std::function<void()> saveDiagnostics;
         std::function<void()> chooseMidiFile;
         std::function<void (const juce::File& file)> openMidiFile;
-        std::function<void (std::size_t part, bool visible)> partVisibilityChanged;
+        std::function<void (std::size_t part, bool muted)> partMuteChanged; ///< "Other tracks" tab
         std::function<void (double pixelsPerSecond)> zoomChanged;
         std::function<void()> playPause;
         std::function<void()> stop;
@@ -58,7 +58,11 @@ public:
     void setInputMonitor (const InputMonitorView& view);
     void setSong (std::shared_ptr<const PianoRollView> song);
     void setSongError (const std::string& message);
-    void setPixelsPerSecond (double pixelsPerSecond) { roll_.setPixelsPerSecond (pixelsPerSecond); }
+    void setPixelsPerSecond (double pixelsPerSecond)
+    {
+        roll_.setPixelsPerSecond (pixelsPerSecond);
+        tracksRoll_.setPixelsPerSecond (pixelsPerSecond);
+    }
     void setTransport (const TransportView& view);
     void setPractice (const PracticeView& view);
     void setSound (const SoundView& view);
@@ -73,8 +77,11 @@ public:
     void filesDropped (const juce::StringArray& files, int x, int y) override;
 
 private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { showTab (tabs_.getCurrentTabIndex()); }
     void rebuildDeviceList (const InputMonitorView& view);
     void rebuildPartList();
+    void showTab (int index);
+    juce::ComboBox* makeRoleBox (std::size_t part, int assignment, juce::Colour colour);
 
     Intents intents_;
     InputMonitorView view_;
@@ -98,10 +105,24 @@ private:
     juce::Label songNotices_;
     juce::Label emptyHint_;
 
+    // Practice tab: the piano parts and their hands.
     juce::Label partsHeader_;
-    juce::OwnedArray<juce::ToggleButton> partToggles_;
-    juce::OwnedArray<juce::Label> partDetails_;
-    juce::OwnedArray<juce::ComboBox> partRoles_;
+    struct PartRow
+    {
+        std::size_t part = 0;
+        std::unique_ptr<juce::Component> head; ///< label (piano part) or play toggle (other track)
+        std::unique_ptr<juce::ComboBox> role;
+        std::unique_ptr<juce::Label> detail;
+    };
+    std::vector<PartRow> pianoRows_;
+    // Other tracks tab: backing parts with a play toggle each.
+    juce::Label tracksHeader_;
+    juce::Label tracksEmpty_;
+    std::vector<PartRow> trackRows_;
+    std::vector<bool> muted_;
+    juce::TabbedButtonBar tabs_ { juce::TabbedButtonBar::TabsAtTop };
+    int tab_ = 0;
+    std::vector<juce::Rectangle<int>> panels_;
 
     juce::TextButton playButton_ { "Play" };
     juce::TextButton stopButton_ { "Stop" };
@@ -125,6 +146,7 @@ private:
     NextNotesBoard board_;
 
     PianoRollComponent roll_;
+    PianoRollComponent tracksRoll_;
     KeyboardStrip keyboard_;
 
     std::vector<std::string> comboIdentifiers_;

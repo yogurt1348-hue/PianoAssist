@@ -36,6 +36,8 @@ struct PianoRollView
         std::string roleText;
         int assignment = 3;            ///< 0 right, 1 left, 2 both split at C4, 3 backing
         bool guessedFromPitch = false; ///< show a "please check" mark
+        std::string instrument;        ///< General MIDI name, e.g. "Acoustic Bass"
+        std::size_t noteCount = 0;
     };
 
     std::string title;              ///< file name

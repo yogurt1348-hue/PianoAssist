@@ -1,5 +1,6 @@
 #include "ui/MainComponent.h"
 
+#include "ui/AppLookAndFeel.h"
 #include "ui/RollColours.h"
 
 namespace pianoassist::ui
@@ -7,14 +8,19 @@ namespace pianoassist::ui
 namespace
 {
 const juce::Colour bannerColour { 0xffb3541e };
-const juce::Colour panelColour { 0xff2a3238 };
-constexpr int partListWidth = 250;
+constexpr int partListWidth = 260;
+constexpr int gap = 8;
+
+bool isPianoAssignment (int assignment)
+{
+    return assignment != 3; // 0 right, 1 left, 2 split; 3 is backing
+}
 
 void setupCaption (juce::Label& label, const juce::String& text)
 {
     label.setText (text, juce::dontSendNotification);
     label.setFont (juce::FontOptions (13.0f));
-    label.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
+    label.setColour (juce::Label::textColourId, theme::mutedText);
 }
 
 void setupValue (juce::Label& label)
@@ -91,7 +97,7 @@ MainComponent::MainComponent (Intents intents)
     songTitle_.setFont (juce::FontOptions (18.0f, juce::Font::bold));
     songTitle_.setText ("No song loaded", juce::dontSendNotification);
     addAndMakeVisible (songTitle_);
-    songSummary_.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
+    songSummary_.setColour (juce::Label::textColourId, theme::mutedText);
     addAndMakeVisible (songSummary_);
     songNotices_.setColour (juce::Label::textColourId, juce::Colours::orange);
     songNotices_.setFont (juce::FontOptions (13.0f));
@@ -99,12 +105,31 @@ MainComponent::MainComponent (Intents intents)
 
     emptyHint_.setText ("Open a MIDI file (.mid) or drop it here to see its notes.", juce::dontSendNotification);
     emptyHint_.setJustificationType (juce::Justification::centred);
-    emptyHint_.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
+    emptyHint_.setColour (juce::Label::textColourId, theme::mutedText);
     addAndMakeVisible (emptyHint_);
 
-    partsHeader_.setText ("Parts (inferred, may be wrong)", juce::dontSendNotification);
+    partsHeader_.setText ("Piano parts: who plays what", juce::dontSendNotification);
     partsHeader_.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    partsHeader_.setTooltip ("Hands are inferred from the file and may be wrong; change them here.");
     addChildComponent (partsHeader_);
+    tracksHeader_.setText ("Other tracks (played by the app)", juce::dontSendNotification);
+    tracksHeader_.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    addChildComponent (tracksHeader_);
+    tracksEmpty_.setText ("This song has no other tracks: every part is piano.", juce::dontSendNotification);
+    tracksEmpty_.setColour (juce::Label::textColourId, theme::mutedText);
+    tracksEmpty_.setJustificationType (juce::Justification::centred);
+    addChildComponent (tracksEmpty_);
+
+    tabs_.addTab ("Practice", theme::panel, 0);
+    tabs_.addTab ("Other tracks", theme::panel, 1);
+    tabs_.setColour (juce::TabbedButtonBar::tabTextColourId, theme::mutedText);
+    tabs_.setColour (juce::TabbedButtonBar::frontTextColourId, theme::text);
+    tabs_.setColour (juce::TabbedButtonBar::tabOutlineColourId, theme::panelEdge);
+    tabs_.setColour (juce::TabbedButtonBar::frontOutlineColourId, theme::accent);
+    tabs_.setTitle ("Views");
+    tabs_.setCurrentTabIndex (0, false);
+    tabs_.addChangeListener (this);
+    addAndMakeVisible (tabs_);
 
     playButton_.onClick = [this] { if (intents_.playPause) intents_.playPause(); };
     stopButton_.setTooltip ("Stop and return to the start. Notes are released and may ring out briefly.");
@@ -117,7 +142,7 @@ MainComponent::MainComponent (Intents intents)
     volume_.onValueChange = [this] { if (intents_.volumeChanged) intents_.volumeChanged (static_cast<float> (volume_.getValue())); };
     volumeLabel_.setText ("Volume", juce::dontSendNotification);
     timeLabel_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
-    transportNote_.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
+    transportNote_.setColour (juce::Label::textColourId, theme::mutedText);
     transportNote_.setFont (juce::FontOptions (13.0f));
     soundLabel_.setText ("Sound", juce::dontSendNotification);
     soundBox_.setTitle ("Sound");
@@ -164,7 +189,7 @@ MainComponent::MainComponent (Intents intents)
     backingToggle_.setTooltip ("Play the band/backing parts (drums, bass, strings...)");
     backingToggle_.onClick = [this] { if (intents_.playBackingChanged) intents_.playBackingChanged (backingToggle_.getToggleState()); };
     toleranceBox_.onChange = [this] { if (intents_.toleranceChanged) intents_.toleranceChanged (toleranceBox_.getSelectedId() - 1); };
-    gateLabel_.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
+    gateLabel_.setColour (juce::Label::textColourId, theme::mutedText);
     gateLabel_.setJustificationType (juce::Justification::centredRight);
     for (auto* c : std::initializer_list<juce::Component*> { &practiceToggle_, &modeBox_, &toleranceBox_, &otherPartToggle_,
                                                               &backingToggle_, &gateLabel_, &board_ })
@@ -182,9 +207,19 @@ MainComponent::MainComponent (Intents intents)
     openButton_.setTooltip ("Open a MIDI file (Ctrl+O), or drag one onto the window");
     practiceToggle_.setTooltip ("Playback stops at each note or chord of your hand until you play it (Ctrl+P)");
 
-    roll_.onZoomChanged = [this] (double pps) { if (intents_.zoomChanged) intents_.zoomChanged (pps); };
-    roll_.onSeekRequested = [this] (double seconds) { if (intents_.seek) intents_.seek (seconds); };
-    addAndMakeVisible (roll_);
+    for (auto* roll : { &roll_, &tracksRoll_ })
+    {
+        roll->onZoomChanged = [this, roll] (double pps) {
+            (roll == &roll_ ? tracksRoll_ : roll_).setPixelsPerSecond (pps);
+            if (intents_.zoomChanged)
+                intents_.zoomChanged (pps);
+        };
+        roll->onSeekRequested = [this] (double seconds) { if (intents_.seek) intents_.seek (seconds); };
+        addChildComponent (roll);
+    }
+    roll_.setVisible (true);
+    roll_.setTitle ("Piano roll of your parts");
+    tracksRoll_.setTitle ("Piano roll of the other tracks");
     keyboard_.onKey = [this] (std::uint8_t pitch, bool down) { if (intents_.keyClicked) intents_.keyClicked (pitch, down); };
     addAndMakeVisible (keyboard_);
     emptyHint_.toFront (false);
@@ -217,9 +252,10 @@ void MainComponent::setTransport (const TransportView& view)
     else
         note = toJuce (view.audioText);
     transportNote_.setText (note, juce::dontSendNotification);
-    transportNote_.setColour (juce::Label::textColourId, view.audioAvailable ? juce::Colours::lightgrey : juce::Colours::orange);
+    transportNote_.setColour (juce::Label::textColourId, view.audioAvailable ? theme::mutedText : juce::Colours::orange);
 
-    roll_.setPlayhead (view.positionSeconds, running);
+    roll_.setPlayhead (view.positionSeconds, running && tab_ == 0);
+    tracksRoll_.setPlayhead (view.positionSeconds, running && tab_ == 1);
 }
 
 void MainComponent::setSound (const SoundView& view)
@@ -289,6 +325,11 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
     if (ctrl && key.getKeyCode() >= '1' && key.getKeyCode() <= '3')
     {
         modeBox_.setSelectedId (key.getKeyCode() - '0', juce::sendNotificationSync);
+        return true;
+    }
+    if (ctrl && key.getKeyCode() == juce::KeyPress::tabKey)
+    {
+        showTab (1 - tab_); // Ctrl+Tab: Practice <-> Other tracks
         return true;
     }
     if (ctrl && key.getKeyCode() == 'T')
@@ -361,10 +402,20 @@ void MainComponent::setSong (std::shared_ptr<const PianoRollView> song)
         notices = "Hands were guessed from pitch: check the parts on the left (marked ?) before practising."
                   + (notices.isEmpty() ? juce::String() : "  " + notices);
     songNotices_.setText (notices, juce::dontSendNotification);
-    songNotices_.setColour (juce::Label::textColourId, juce::Colours::orange);
+    songNotices_.setColour (juce::Label::textColourId, theme::warning);
     emptyHint_.setVisible (song_ == nullptr);
+    tracksRoll_.setSong (song_.get());
+    if (song_)
+        for (std::size_t i = 0; i < song_->parts.size(); ++i)
+        {
+            const bool piano = isPianoAssignment (song_->parts[i].assignment);
+            roll_.setPartVisible (i, piano);
+            tracksRoll_.setPartVisible (i, ! piano);
+        }
+    if (! song_ || muted_.size() != song_->parts.size())
+        muted_.assign (song_ ? song_->parts.size() : 0, false);
     rebuildPartList();
-    resized();
+    showTab (tab_);
 }
 
 void MainComponent::setSongError (const std::string& message)
@@ -373,163 +424,238 @@ void MainComponent::setSongError (const std::string& message)
     songNotices_.setColour (juce::Label::textColourId, juce::Colours::orangered);
 }
 
+juce::ComboBox* MainComponent::makeRoleBox (std::size_t part, int assignment, juce::Colour colour)
+{
+    auto* role = new juce::ComboBox();
+    role->addItem ("Right hand", 1);
+    role->addItem ("Left hand", 2);
+    role->addItem ("Both hands (split at C4)", 3);
+    role->addItem ("Other track (app plays it)", 4);
+    role->setSelectedId (assignment + 1, juce::dontSendNotification);
+    role->setTitle ("Who plays this part");
+    role->setTooltip ("Who plays this part. Change it if the guess is wrong.");
+    role->setColour (juce::ComboBox::outlineColourId, colour);
+    role->onChange = [this, part, role] {
+        // Deferred: the change rebuilds this list, which deletes this box.
+        const int chosen = role->getSelectedId() - 1;
+        juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), part, chosen] {
+            if (safe != nullptr && safe->intents_.partAssignmentChanged)
+                safe->intents_.partAssignmentChanged (part, chosen);
+        });
+    };
+    return role;
+}
+
 void MainComponent::rebuildPartList()
 {
-    partToggles_.clear();
-    partDetails_.clear();
-    partRoles_.clear();
-    partsHeader_.setVisible (song_ != nullptr);
+    pianoRows_.clear();
+    trackRows_.clear();
     if (! song_)
         return;
 
+    int backingCount = 0;
     for (std::size_t i = 0; i < song_->parts.size(); ++i)
     {
         const auto& part = song_->parts[i];
-        auto* toggle = partToggles_.add (new juce::ToggleButton (toJuce ((part.guessedFromPitch ? "? " : "") + part.label)));
-        toggle->setToggleState (true, juce::dontSendNotification);
-        toggle->setColour (juce::ToggleButton::textColourId, roleColour (part.role).brighter (0.3f));
-        toggle->setColour (juce::ToggleButton::tickColourId, roleColour (part.role));
-        toggle->setTooltip ("Show or hide this part in the piano roll");
-        toggle->onClick = [this, i, toggle] {
-            roll_.setPartVisible (i, toggle->getToggleState());
-            if (intents_.partVisibilityChanged)
-                intents_.partVisibilityChanged (i, toggle->getToggleState());
-        };
-        addAndMakeVisible (toggle);
+        const auto colour = roleColour (part.role);
+        PartRow row;
+        row.part = i;
+        row.role.reset (makeRoleBox (i, part.assignment, colour));
+        row.detail = std::make_unique<juce::Label>();
+        row.detail->setFont (juce::FontOptions (12.0f));
+        row.detail->setColour (juce::Label::textColourId, theme::mutedText);
 
-        auto* detail = partDetails_.add (new juce::Label());
-        detail->setText (toJuce (part.detail), juce::dontSendNotification);
-        detail->setFont (juce::FontOptions (12.0f));
-        detail->setColour (juce::Label::textColourId, juce::Colours::grey);
-        addAndMakeVisible (detail);
-
-        auto* role = partRoles_.add (new juce::ComboBox());
-        role->addItem ("Right hand", 1);
-        role->addItem ("Left hand", 2);
-        role->addItem ("Both hands (split at C4)", 3);
-        role->addItem ("Backing (app plays it)", 4);
-        role->setSelectedId (part.assignment + 1, juce::dontSendNotification);
-        role->setTooltip ("Who plays this part. Change it if the guess is wrong.");
-        role->setColour (juce::ComboBox::outlineColourId, roleColour (part.role));
-        role->onChange = [this, i, role] {
-            // Deferred: the change rebuilds this list, which deletes this box.
-            const int assignment = role->getSelectedId() - 1;
-            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<MainComponent> (this), i, assignment] {
-                if (safe != nullptr && safe->intents_.partAssignmentChanged)
-                    safe->intents_.partAssignmentChanged (i, assignment);
-            });
-        };
-        addAndMakeVisible (role);
+        if (isPianoAssignment (part.assignment))
+        {
+            auto label = std::make_unique<juce::Label>();
+            label->setText (toJuce ((part.guessedFromPitch ? "? " : "") + part.label), juce::dontSendNotification);
+            label->setColour (juce::Label::textColourId, colour.brighter (0.3f));
+            label->setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            if (part.guessedFromPitch)
+                label->setTooltip ("Guessed from pitch: please check");
+            row.head = std::move (label);
+            row.detail->setText (toJuce (part.detail), juce::dontSendNotification);
+        }
+        else
+        {
+            ++backingCount;
+            auto play = std::make_unique<juce::ToggleButton> (toJuce (part.instrument + " · " + part.label));
+            play->setToggleState (i >= muted_.size() || ! muted_[i], juce::dontSendNotification);
+            play->setColour (juce::ToggleButton::textColourId, theme::text);
+            play->setTooltip ("Play this track. Untick to mute it.");
+            auto* raw = play.get();
+            play->onClick = [this, i, raw] {
+                if (i < muted_.size())
+                    muted_[i] = ! raw->getToggleState();
+                if (intents_.partMuteChanged)
+                    intents_.partMuteChanged (i, ! raw->getToggleState());
+            };
+            row.head = std::move (play);
+            row.detail->setText (toJuce (part.detail), juce::dontSendNotification);
+        }
+        for (auto* c : std::initializer_list<juce::Component*> { row.head.get(), row.role.get(), row.detail.get() })
+            addChildComponent (c);
+        (isPianoAssignment (part.assignment) ? pianoRows_ : trackRows_).push_back (std::move (row));
     }
+    tabs_.setTabName (1, backingCount > 0 ? "Other tracks (" + juce::String (backingCount) + ")" : juce::String ("Other tracks"));
+}
+
+void MainComponent::showTab (int index)
+{
+    tab_ = index;
+    if (tabs_.getCurrentTabIndex() != index)
+        tabs_.setCurrentTabIndex (index, false);
+    const bool practice = index == 0;
+    const bool hasSong = song_ != nullptr;
+    roll_.setVisible (practice);
+    tracksRoll_.setVisible (! practice && hasSong);
+    partsHeader_.setVisible (practice && hasSong);
+    tracksHeader_.setVisible (! practice && hasSong);
+    tracksEmpty_.setVisible (! practice && hasSong && trackRows_.empty());
+    for (auto& row : pianoRows_)
+        for (auto* c : std::initializer_list<juce::Component*> { row.head.get(), row.role.get(), row.detail.get() })
+            c->setVisible (practice);
+    for (auto& row : trackRows_)
+        for (auto* c : std::initializer_list<juce::Component*> { row.head.get(), row.role.get(), row.detail.get() })
+            c->setVisible (! practice);
+    resized();
 }
 
 void MainComponent::paint (juce::Graphics& g)
 {
-    g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
-    g.setColour (panelColour);
-    g.fillRoundedRectangle (lastNoteCaption_.getBounds().getUnion (rateValue_.getBounds()).expanded (10, 4).toFloat(), 6.0f);
+    g.fillAll (theme::window);
+    for (const auto& panel : panels_)
+    {
+        g.setColour (theme::panel);
+        g.fillRoundedRectangle (panel.toFloat(), 8.0f);
+        g.setColour (theme::panelEdge);
+        g.drawRoundedRectangle (panel.toFloat().reduced (0.5f), 8.0f, 1.0f);
+    }
 }
 
 void MainComponent::resized()
 {
+    panels_.clear();
     auto area = getLocalBounds().reduced (12);
+    const auto panel = [this] (juce::Rectangle<int> r) {
+        panels_.push_back (r);
+        return r.reduced (10, 8);
+    };
 
-    auto bar = area.removeFromTop (30);
-    inputLabel_.setBounds (bar.removeFromLeft (84));
-    logButton_.setBounds (bar.removeFromRight (130));
-    bar.removeFromRight (6);
-    rescanButton_.setBounds (bar.removeFromRight (80));
-    bar.removeFromRight (6);
-    inputBox_.setBounds (bar.removeFromLeft (std::min (bar.getWidth(), 420)));
-    bar.removeFromLeft (10);
-    statusLabel_.setBounds (bar);
-
-    if (bannerLabel_.isVisible())
+    // 1. Input: device row and live monitor.
     {
-        area.removeFromTop (6);
-        bannerLabel_.setBounds (area.removeFromTop (32));
-    }
-
-    area.removeFromTop (10);
-    auto monitor = area.removeFromTop (44).reduced (10, 0);
-    const auto columnWidth = monitor.getWidth() / 4;
-    const std::pair<juce::Label*, juce::Label*> columns[] = { { &lastNoteCaption_, &lastNoteValue_ },
-                                                              { &heldCaption_, &heldValue_ },
-                                                              { &sustainCaption_, &sustainValue_ },
-                                                              { &rateCaption_, &rateValue_ } };
-    for (const auto& [caption, value] : columns)
-    {
-        auto column = monitor.removeFromLeft (columnWidth);
-        caption->setBounds (column.removeFromTop (18));
-        value->setBounds (column);
-    }
-
-    area.removeFromTop (12);
-    auto songBar = area.removeFromTop (30);
-    openButton_.setBounds (songBar.removeFromLeft (150));
-    songBar.removeFromLeft (10);
-    songTitle_.setBounds (songBar.removeFromLeft (std::min (songBar.getWidth() / 2, 380)));
-    songSummary_.setBounds (songBar);
-    songNotices_.setBounds (area.removeFromTop (songNotices_.getText().isEmpty() ? 0 : 22));
-
-    area.removeFromTop (6);
-    auto transportBar = area.removeFromTop (30);
-    playButton_.setBounds (transportBar.removeFromLeft (80));
-    transportBar.removeFromLeft (6);
-    stopButton_.setBounds (transportBar.removeFromLeft (70));
-    transportBar.removeFromLeft (6);
-    silenceButton_.setBounds (transportBar.removeFromLeft (80));
-    transportBar.removeFromLeft (12);
-    timeLabel_.setBounds (transportBar.removeFromLeft (120));
-    soundLabel_.setBounds (transportBar.removeFromLeft (50));
-    soundBox_.setBounds (transportBar.removeFromLeft (220));
-    transportBar.removeFromLeft (6);
-    instrumentWindowButton_.setBounds (transportBar.removeFromLeft (100));
-    transportBar.removeFromLeft (10);
-    volume_.setBounds (transportBar.removeFromRight (160));
-    volumeLabel_.setBounds (transportBar.removeFromRight (60));
-    transportNote_.setBounds (transportBar);
-
-    area.removeFromTop (6);
-    auto practiceBar = area.removeFromTop (30);
-    practiceToggle_.setBounds (practiceBar.removeFromLeft (230));
-    practiceBar.removeFromLeft (6);
-    modeBox_.setBounds (practiceBar.removeFromLeft (130));
-    practiceBar.removeFromLeft (12);
-    toleranceBox_.setBounds (practiceBar.removeFromLeft (140));
-    practiceBar.removeFromLeft (12);
-    // Narrow windows (for example 200% scaling on a laptop) get a second row.
-    constexpr int secondRowWidth = 140 + 120 + 200;
-    if (practiceBar.getWidth() < secondRowWidth)
-    {
-        area.removeFromTop (4);
-        practiceBar = area.removeFromTop (26);
-    }
-    otherPartToggle_.setBounds (practiceBar.removeFromLeft (140));
-    backingToggle_.setBounds (practiceBar.removeFromLeft (120));
-    gateLabel_.setBounds (practiceBar.removeFromRight (std::min (200, practiceBar.getWidth())));
-
-    area.removeFromTop (6);
-    keyboard_.setBounds (area.removeFromBottom (84));
-    area.removeFromBottom (6);
-    board_.setBounds (area.removeFromBottom (92));
-    area.removeFromBottom (6);
-
-    if (song_)
-    {
-        auto list = area.removeFromLeft (partListWidth);
-        area.removeFromLeft (8);
-        partsHeader_.setBounds (list.removeFromTop (22));
-        for (int i = 0; i < partToggles_.size(); ++i)
+        auto box = panel (area.removeFromTop (bannerLabel_.isVisible() ? 140 : 102));
+        auto bar = box.removeFromTop (30);
+        inputLabel_.setBounds (bar.removeFromLeft (84));
+        logButton_.setBounds (bar.removeFromRight (130));
+        bar.removeFromRight (6);
+        rescanButton_.setBounds (bar.removeFromRight (80));
+        bar.removeFromRight (6);
+        inputBox_.setBounds (bar.removeFromLeft (std::min (bar.getWidth() / 2, 420)));
+        bar.removeFromLeft (10);
+        statusLabel_.setBounds (bar);
+        if (bannerLabel_.isVisible())
         {
-            partToggles_[i]->setBounds (list.removeFromTop (24));
-            partRoles_[i]->setBounds (list.removeFromTop (24).withTrimmedLeft (26));
-            partDetails_[i]->setBounds (list.removeFromTop (18).withTrimmedLeft (26));
-            list.removeFromTop (4);
+            box.removeFromTop (6);
+            bannerLabel_.setBounds (box.removeFromTop (32));
+        }
+        box.removeFromTop (8);
+        auto monitor = box.removeFromTop (44);
+        const auto columnWidth = monitor.getWidth() / 4;
+        const std::pair<juce::Label*, juce::Label*> columns[] = { { &lastNoteCaption_, &lastNoteValue_ },
+                                                                  { &heldCaption_, &heldValue_ },
+                                                                  { &sustainCaption_, &sustainValue_ },
+                                                                  { &rateCaption_, &rateValue_ } };
+        for (const auto& [caption, value] : columns)
+        {
+            auto column = monitor.removeFromLeft (columnWidth);
+            caption->setBounds (column.removeFromTop (18));
+            value->setBounds (column);
         }
     }
-    roll_.setBounds (area);
-    emptyHint_.setBounds (area.withSizeKeepingCentre (area.getWidth(), 40));
+    area.removeFromTop (gap);
+
+    // 2. Song, transport, sound and practice controls.
+    {
+        const bool narrow = area.getWidth() < 1180;
+        const int rows = 3 + (narrow ? 1 : 0);
+        const int notices = songNotices_.getText().isEmpty() ? 0 : 22;
+        auto box = panel (area.removeFromTop (16 + rows * 34 + notices));
+
+        auto songBar = box.removeFromTop (30);
+        openButton_.setBounds (songBar.removeFromLeft (150));
+        songBar.removeFromLeft (10);
+        songTitle_.setBounds (songBar.removeFromLeft (std::min (songBar.getWidth() / 2, 380)));
+        songSummary_.setBounds (songBar);
+        songNotices_.setBounds (box.removeFromTop (notices));
+        box.removeFromTop (4);
+
+        auto transportBar = box.removeFromTop (30);
+        playButton_.setBounds (transportBar.removeFromLeft (80));
+        transportBar.removeFromLeft (6);
+        stopButton_.setBounds (transportBar.removeFromLeft (70));
+        transportBar.removeFromLeft (6);
+        silenceButton_.setBounds (transportBar.removeFromLeft (80));
+        transportBar.removeFromLeft (12);
+        timeLabel_.setBounds (transportBar.removeFromLeft (110));
+        volume_.setBounds (transportBar.removeFromRight (140));
+        volumeLabel_.setBounds (transportBar.removeFromRight (56));
+        auto soundRow = transportBar;
+        if (narrow)
+        {
+            transportNote_.setBounds (transportBar);
+            box.removeFromTop (4);
+            soundRow = box.removeFromTop (30);
+        }
+        soundLabel_.setBounds (soundRow.removeFromLeft (50));
+        soundBox_.setBounds (soundRow.removeFromLeft (240));
+        soundRow.removeFromLeft (6);
+        instrumentWindowButton_.setBounds (soundRow.removeFromLeft (100));
+        soundRow.removeFromLeft (10);
+        if (! narrow)
+            transportNote_.setBounds (soundRow);
+        box.removeFromTop (4);
+
+        auto practiceBar = box.removeFromTop (30);
+        practiceToggle_.setBounds (practiceBar.removeFromLeft (220));
+        practiceBar.removeFromLeft (6);
+        modeBox_.setBounds (practiceBar.removeFromLeft (120));
+        practiceBar.removeFromLeft (8);
+        toleranceBox_.setBounds (practiceBar.removeFromLeft (136));
+        practiceBar.removeFromLeft (12);
+        otherPartToggle_.setBounds (practiceBar.removeFromLeft (134));
+        backingToggle_.setBounds (practiceBar.removeFromLeft (120));
+        gateLabel_.setBounds (practiceBar.removeFromRight (std::max (0, std::min (160, practiceBar.getWidth()))));
+    }
+    area.removeFromTop (gap);
+
+    // 3. Keyboard and the "play next" board at the bottom, always visible.
+    keyboard_.setBounds (area.removeFromBottom (84));
+    area.removeFromBottom (gap);
+    board_.setBounds (area.removeFromBottom (92));
+    area.removeFromBottom (gap);
+
+    // 4. Tabs: your piano parts, or the other tracks.
+    tabs_.setBounds (area.removeFromTop (30).withWidth (std::min (area.getWidth(), 360)));
+    auto content = panel (area);
+    if (song_)
+    {
+        auto list = content.removeFromLeft (partListWidth);
+        content.removeFromLeft (gap);
+        const bool practice = tab_ == 0;
+        (practice ? partsHeader_ : tracksHeader_).setBounds (list.removeFromTop (22));
+        for (auto& row : practice ? pianoRows_ : trackRows_)
+        {
+            row.head->setBounds (list.removeFromTop (24));
+            row.role->setBounds (list.removeFromTop (24).withTrimmedLeft (practice ? 0 : 26));
+            row.detail->setBounds (list.removeFromTop (18).withTrimmedLeft (practice ? 0 : 26));
+            list.removeFromTop (6);
+        }
+        tracksEmpty_.setBounds (content.withSizeKeepingCentre (content.getWidth(), 40));
+    }
+    roll_.setBounds (content);
+    tracksRoll_.setBounds (content);
+    emptyHint_.setBounds (content.withSizeKeepingCentre (content.getWidth(), 40));
     repaint();
 }
 

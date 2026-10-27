@@ -68,6 +68,8 @@ public:
     void setMode (lesson::PracticeMode mode);
     void setProfile (lesson::PracticeProfile profile);
     void setAccompaniment (lesson::Accompaniment accompaniment);
+    /** Per song part: true silences it (the "Other tracks" tab). */
+    void setMutedParts (std::vector<bool> muted);
     void previewKey (std::uint8_t pitch, bool down); ///< a click on the on-screen keyboard
 
     PracticeSnapshot snapshot() const;
@@ -82,8 +84,9 @@ private:
     struct SetMode { lesson::PracticeMode mode; };
     struct SetProfile { lesson::PracticeProfile profile; };
     struct SetAccompaniment { lesson::Accompaniment accompaniment; };
+    struct SetMutedParts { std::vector<bool> muted; };
     struct PreviewKey { std::uint8_t pitch; bool down; };
-    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, SetAccompaniment, PreviewKey>;
+    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, SetAccompaniment, SetMutedParts, PreviewKey>;
 
     void post (Intent intent);
     void hiResTimerCallback() override;
@@ -109,6 +112,7 @@ private:
     bool practising_ = false;
     lesson::PracticeMode mode_ = lesson::PracticeMode::bothHands;
     lesson::Accompaniment accompaniment_;
+    std::vector<bool> mutedParts_;
     std::optional<lesson::PracticeSession> session_;
     std::vector<GateHands> hands_; ///< parallel to the session's gates
     std::uint64_t seenArrivals_ = 0;

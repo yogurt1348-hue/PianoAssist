@@ -32,8 +32,9 @@ struct PlaybackEventList
     std::array<std::int16_t, 16> programs { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
 };
 
-/** includeRole decides which notes sound; sustain events always pass. */
+/** include decides which notes sound (by role, part...); sustain events
+    always pass. */
 PlaybackEventList buildPlaybackEvents (const timeline::Song& song, std::uint64_t id,
-                                       const std::function<bool (timeline::NoteRole)>& includeRole = {});
+                                       const std::function<bool (const timeline::Note&)>& include = {});
 
 } // namespace pianoassist::audio
