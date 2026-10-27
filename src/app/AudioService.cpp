@@ -1,6 +1,7 @@
 #include "app/AudioService.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace pianoassist::app
 {
@@ -378,13 +379,23 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
     blockSeq_.store (seq + 2, std::memory_order_release);
 
     gain_.setTargetValue (targetGain_.load (std::memory_order_relaxed));
+    float peaks[2] { 0.0f, 0.0f };
     for (int i = 0; i < numSamples; ++i)
     {
         const auto g = gain_.getNextValue();
         for (int ch = 0; ch < numOutputs; ++ch)
             if (outputs[ch] != nullptr)
+            {
                 outputs[ch][i] *= g;
+                peaks[std::min (ch, 1)] = std::max (peaks[std::min (ch, 1)], std::abs (outputs[ch][i]));
+            }
     }
+    if (numOutputs == 1)
+        peaks[1] = peaks[0];
+    if (peaks[0] > peakLeft_.load (std::memory_order_relaxed))
+        peakLeft_.store (peaks[0], std::memory_order_relaxed);
+    if (peaks[1] > peakRight_.load (std::memory_order_relaxed))
+        peakRight_.store (peaks[1], std::memory_order_relaxed);
 
     position_.store (engine_.positionSeconds(), std::memory_order_relaxed);
     state_.store (static_cast<int> (engine_.state()), std::memory_order_relaxed);
@@ -418,6 +429,11 @@ AudioService::Health AudioService::takeHealth()
     if (auto* device = deviceManager_.getCurrentAudioDevice())
         h.xruns = device->getXRunCount();
     return h;
+}
+
+std::pair<float, float> AudioService::takePeaks()
+{
+    return { peakLeft_.exchange (0.0f, std::memory_order_relaxed), peakRight_.exchange (0.0f, std::memory_order_relaxed) };
 }
 
 double AudioService::reportedOutputLatencyMs() const

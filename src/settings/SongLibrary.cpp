@@ -37,7 +37,10 @@ std::string nowIso()
 
 json soundJson (const SoundSettings& s)
 {
-    return { { "kind", s.kind }, { "pluginId", s.pluginId }, { "pluginName", s.pluginName }, { "soundFontPath", s.soundFontPath } };
+    json j { { "kind", s.kind }, { "pluginId", s.pluginId }, { "pluginName", s.pluginName }, { "soundFontPath", s.soundFontPath } };
+    if (s.presetProgram >= 0)
+        j["preset"] = { { "bank", s.presetBank }, { "program", s.presetProgram }, { "name", s.presetName } };
+    return j;
 }
 
 template <typename T>
@@ -73,6 +76,20 @@ void readSound (const json& object, SoundSettings& sound, std::vector<std::strin
     readValue (object, "pluginId", sound.pluginId, warnings, where);
     readValue (object, "pluginName", sound.pluginName, warnings, where);
     readValue (object, "soundFontPath", sound.soundFontPath, warnings, where);
+    if (const auto preset = object.find ("preset"); preset != object.end() && preset->is_object())
+    {
+        int bank = -1, program = -1;
+        readValue (*preset, "bank", bank, warnings, where + ".preset");
+        readValue (*preset, "program", program, warnings, where + ".preset");
+        readValue (*preset, "name", sound.presetName, warnings, where + ".preset");
+        if (program >= 0 && program < 100000 && bank >= -1 && bank < 16384)
+        {
+            sound.presetBank = bank;
+            sound.presetProgram = program;
+        }
+        else
+            warnings.push_back (where + ".preset is out of range; the file's instrument is used.");
+    }
 }
 
 bool isReservedWindowsName (std::string upper)
@@ -133,7 +150,8 @@ std::string toJson (const SongManifest& m)
     json tracks = json::array();
     for (const auto& t : m.tracks)
         tracks.push_back ({ { "track", t.track }, { "channel", t.channel }, { "assignment", t.assignment }, { "muted", t.muted },
-                            { "solo", t.solo }, { "volume", t.volume }, { "sound", soundJson (t.sound) }, { "stateFile", t.stateFile } });
+                            { "solo", t.solo }, { "volume", t.volume }, { "sound", soundJson (t.sound) }, { "stateFile", t.stateFile },
+                            { "colour", t.colour }, { "visible", t.visible }, { "order", t.order } });
     const json root {
         { "schemaVersion", SongManifest::currentSchemaVersion },
         { "id", m.id },
@@ -212,6 +230,16 @@ LoadedManifest manifestFromJson (std::string_view text)
                 readValue (t, "solo", state.solo, warnings, "track");
             readValue (t, "volume", state.volume, warnings, "track");
             readValue (t, "stateFile", state.stateFile, warnings, "track");
+            if (t.contains ("colour"))
+                readValue (t, "colour", state.colour, warnings, "track");
+            if (t.contains ("visible"))
+                readValue (t, "visible", state.visible, warnings, "track");
+            if (t.contains ("order"))
+                readValue (t, "order", state.order, warnings, "track");
+            if (state.colour.size() > 16)
+                state.colour.clear();
+            if (state.order < -1 || state.order > 255)
+                state.order = -1;
             if (const auto sound = t.find ("sound"); sound != t.end())
                 readSound (*sound, state.sound, warnings, "track.sound");
             if (state.channel < 0 || state.channel > 15)

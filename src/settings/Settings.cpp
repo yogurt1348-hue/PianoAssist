@@ -124,7 +124,9 @@ std::string toJson (const Settings& s)
         { "visual", { { "pixelsPerSecond", s.visual.pixelsPerSecond }, { "showNoteNames", s.visual.showNoteNames },
                       { "followPlayhead", s.visual.followPlayhead }, { "sidebarWidth", s.visual.sidebarWidth },
                       { "sidebarCollapsed", s.visual.sidebarCollapsed }, { "tracksWindow", s.visual.tracksWindow },
-                      { "tracksColumns", s.visual.tracksColumns } } },
+                      { "tracksColumns", s.visual.tracksColumns }, { "colourByTrack", s.visual.colourByTrack },
+                      { "hideDimmed", s.visual.hideDimmed }, { "pianoOnly", s.visual.pianoOnly },
+                      { "tracksInspector", s.visual.tracksInspector } } },
         { "calibration", { { "inputOffsetMs", s.calibration.inputOffsetMs } } },
         { "sound",
           { { "kind", s.sound.kind },
@@ -202,6 +204,10 @@ LoadResult fromJson (std::string_view text)
     reader.read ("visual", "sidebarCollapsed", s.visual.sidebarCollapsed);
     reader.read ("visual", "tracksWindow", s.visual.tracksWindow, [] (const std::string& v) { return v.size() <= 64; });
     reader.read ("visual", "tracksColumns", s.visual.tracksColumns, [] (const std::string& v) { return v.size() <= 2048; });
+    reader.read ("visual", "colourByTrack", s.visual.colourByTrack);
+    reader.read ("visual", "hideDimmed", s.visual.hideDimmed);
+    reader.read ("visual", "pianoOnly", s.visual.pianoOnly);
+    reader.read ("visual", "tracksInspector", s.visual.tracksInspector);
 
     const auto maxOffset = lesson::InputCalibration::maxAbsOffsetMs;
     reader.read ("calibration", "inputOffsetMs", s.calibration.inputOffsetMs,

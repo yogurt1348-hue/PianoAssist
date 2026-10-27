@@ -638,6 +638,7 @@ void LessonController::publish (const AudioService::Snapshot& audio)
         if (const auto* gate = session_->currentGate())
         {
             snap.gateNumber = gate->index + 1;
+            snap.gateOnsetSeconds = gate->onsetSeconds;
             snap.missing = session_->missingPitches();
             if (gate->index < hands_.size())
             {

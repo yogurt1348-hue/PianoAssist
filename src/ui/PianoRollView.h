@@ -41,6 +41,8 @@ struct PianoRollView
         std::string trackName;         ///< as in the file, may be empty
         int track = 0;                 ///< 1-based
         int channel = 1;               ///< 1-based MIDI channel
+        int program = -1;              ///< General MIDI program, 0-based; -1 when none
+        bool drums = false;            ///< channel 10
     };
 
     std::string title;              ///< file name
@@ -50,6 +52,7 @@ struct PianoRollView
     std::vector<Part> parts;
     std::vector<double> barStarts;
     double durationSeconds = 0.0;
+    int beatsPerBar = 4;            ///< from the first time signature, for "bar 3, beat 2"
     bool needsPartCheck = false;    ///< some hand was only guessed from pitch
     std::uint8_t lowestPitch = 60;
     std::uint8_t highestPitch = 72;

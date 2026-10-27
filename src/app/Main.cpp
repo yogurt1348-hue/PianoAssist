@@ -16,6 +16,7 @@
 #include "ui/AppLookAndFeel.h"
 #include "ui/MainComponent.h"
 #include "ui/LibraryComponent.h"
+#include "ui/TrackColours.h"
 #include "ui/TracksComponent.h"
 #include "ui/SettingsComponent.h"
 #include "ui/Translations.h"
@@ -430,6 +431,7 @@ private:
         content->setTempo (static_cast<int> (std::lround (settings_.practice.tempoPercent)));
         content->setRecentFiles (settings_.recentFiles);
         content->setLayoutChoices (settings_.visual.sidebarWidth, settings_.visual.sidebarCollapsed, settings_.visual.followPlayhead);
+        content->setViewOptions (settings_.visual.colourByTrack, settings_.visual.hideDimmed, settings_.visual.pianoOnly);
         midi_->setViewListener ([this] (const ui::InputMonitorView& view) {
             lastInputView_ = view;
             content_->setInputMonitor (view);
@@ -518,7 +520,10 @@ private:
                          { { "start", juce::String (start, 2).toStdString() }, { "end", juce::String (end, 2).toStdString() } });
             scheduleSongSave();
         };
-        i.volumeChanged = [this] (float gain) { audio_->setGain (gain); };
+        i.volumeChanged = [this] (float gain) {
+            audio_->setGain (gain);
+            masterGain_ = gain;
+        };
         i.zoomChanged = [this] (double pixelsPerSecond) {
             settings_.visual.pixelsPerSecond = pixelsPerSecond;
             manifest_.pixelsPerSecond = pixelsPerSecond;
@@ -579,6 +584,25 @@ private:
         i.showInstrumentWindow = [this] { instruments_->showEditor(); };
         i.themeChanged = [this] (bool light) { setTheme (light); };
         i.uiScaleChanged = [this] (double scale) { setScale (scale); };
+        i.partVisibleChanged = [this] (std::size_t part, bool visible) { setPartShown (part, visible); };
+        i.selectPart = [this] (int part) { selectPart (part); };
+        i.showOnlyPart = [this] (std::size_t part) { showOnlyPart (part); };
+        i.showAllParts = [this] { showAllParts(); };
+        i.clearSolos = [this] { clearSolos(); };
+        i.colourByTrackChanged = [this] (bool byTrack) {
+            settings_.visual.colourByTrack = byTrack;
+            log_->write (LogLevel::info, "ui", "Roll colours", { { "by", byTrack ? "track" : "hand" } });
+            scheduleSettingsSave();
+        };
+        i.hideDimmedChanged = [this] (bool hide) {
+            settings_.visual.hideDimmed = hide;
+            scheduleSettingsSave();
+        };
+        i.pianoOnlyChanged = [this] (bool only) {
+            settings_.visual.pianoOnly = only;
+            log_->write (LogLevel::info, "ui", "Piano parts only", { { "on", only ? "yes" : "no" } });
+            scheduleSettingsSave();
+        };
         return i;
     }
 
@@ -846,6 +870,48 @@ private:
         return silent;
     }
 
+    /** Who plays each part now: the app (heard), the learner (checked), or
+        nobody, and why. Mute wins over Solo; the accompaniment switches and
+        the practised hands decide the rest, as LessonController does. */
+    void describeHearing (ui::TrackRowView& r, std::size_t i, bool anySolo) const
+    {
+        const auto practice = lesson_->snapshot();
+        const auto assignment = song_->parts[i].assignment;
+        using A = timeline::Part::Assignment;
+        using R = timeline::NoteRole;
+        std::vector<R> roles;
+        switch (assignment)
+        {
+            case A::rightHand:      roles = { R::rightHand }; break;
+            case A::leftHand:       roles = { R::leftHand }; break;
+            case A::splitAtMiddleC: roles = { R::rightHand, R::leftHand }; break;
+            case A::backing:        roles = { R::backing }; break;
+            case A::excluded:       break;
+        }
+        bool app = false, learner = false;
+        for (const auto role : roles)
+        {
+            learner = learner || (practice.practising && lesson::isRequired (role, practice.mode));
+            app = app || lesson::isPlayedByApp (role, practice.practising, practice.mode, practice.accompaniment);
+        }
+        r.checked = learner;
+        r.heard = false;
+        using Q = ui::TrackRowView;
+        if (assignment == A::excluded)
+            r.quiet = Q::excludedQuiet;
+        else if (r.muted)
+            r.quiet = Q::mutedQuiet;
+        else if (anySolo && ! r.solo)
+            r.quiet = Q::otherSolo;
+        else if (! app)
+            r.quiet = learner ? Q::playedByYou : assignment == A::backing ? Q::backingOff : Q::otherHandOff;
+        else
+        {
+            r.quiet = Q::audible;
+            r.heard = true;
+        }
+    }
+
     void refreshTracks()
     {
         std::vector<ui::TrackRowView> rows;
@@ -854,6 +920,11 @@ private:
             const auto view = makePianoRollView (*song_, songTitle_);
             const auto sounds = instruments_->partSoundIds();
             const auto editors = instruments_->partHasEditor();
+            std::vector<ui::TrackColourKey> keys;
+            for (const auto& part : song_->parts)
+                keys.push_back ({ part.program, part.channel == 9 });
+            const auto autoColours = ui::autoTrackColours (keys);
+            const bool anySolo = std::find (soloParts_.begin(), soloParts_.end(), true) != soloParts_.end();
             for (std::size_t i = 0; i < view.parts.size(); ++i)
             {
                 const auto& p = view.parts[i];
@@ -871,12 +942,141 @@ private:
                 r.muted = i < mutedParts_.size() && mutedParts_[i];
                 r.solo = i < soloParts_.size() && soloParts_[i];
                 r.hasEditor = i < editors.size() && editors[i];
+                if (const auto preset = instruments_->partPreset (i))
+                {
+                    r.presetName = preset->name.empty() ? (preset->bank >= 0 ? std::to_string (preset->bank) + ":" : std::string())
+                                                              + std::to_string (preset->program + 1)
+                                                        : preset->name;
+                    r.presetDrums = preset->drums;
+                }
+                r.soundProblem = instruments_->partProblem (i);
+                const auto chosen = i < partColours_.size() ? partColours_[i] : std::nullopt;
+                r.colour = chosen.value_or (autoColours[i]);
+                r.autoColour = ! chosen.has_value();
+                r.visible = i >= partShown_.size() || partShown_[i];
+                r.order = i < partOrder_.size() ? partOrder_[i] : static_cast<int> (i);
+                describeHearing (r, i, anySolo);
                 rows.push_back (std::move (r));
             }
         }
-        content_->setTracks (rows);
+        if (selectedPart_ >= static_cast<int> (rows.size()))
+            selectedPart_ = -1;
+        content_->setTracks (rows, selectedPart_);
         if (tracks_ui_ != nullptr)
+        {
             tracks_ui_->setRows (std::move (rows));
+            tracks_ui_->setSelected (selectedPart_);
+            std::vector<ui::PresetView> presets;
+            if (selectedPart_ >= 0)
+                for (const auto& p : instruments_->partPresets (static_cast<std::size_t> (selectedPart_)))
+                    presets.push_back ({ p.bank, p.program, p.name, p.drums });
+            tracks_ui_->setPresets (selectedPart_, std::move (presets),
+                                    selectedPart_ >= 0 ? instruments_->partSourceName (static_cast<std::size_t> (selectedPart_)) : std::string());
+        }
+    }
+
+    void selectPart (int part)
+    {
+        selectedPart_ = part;
+        refreshTracks(); // selection changes nothing that sounds
+    }
+
+    void setPartColour (std::size_t part, std::optional<std::uint32_t> colour)
+    {
+        if (song_ == nullptr || part >= song_->parts.size())
+            return;
+        partColours_.resize (song_->parts.size());
+        partColours_[part] = colour;
+        log_->write (LogLevel::info, "ui", "Track colour", { { "part", std::to_string (part + 1) },
+                                                              { "colour", colour ? ui::hexColour (*colour) : "automatic" } });
+        refreshTracks();
+        scheduleSongSave();
+    }
+
+    void setPartShown (std::size_t part, bool shown)
+    {
+        if (song_ == nullptr || part >= song_->parts.size())
+            return;
+        partShown_.resize (song_->parts.size(), true);
+        partShown_[part] = shown;
+        refreshTracks();
+        scheduleSongSave();
+    }
+
+    void showOnlyPart (std::size_t part)
+    {
+        if (song_ == nullptr || part >= song_->parts.size())
+            return;
+        partShown_.assign (song_->parts.size(), false);
+        partShown_[part] = true;
+        selectedPart_ = static_cast<int> (part);
+        log_->write (LogLevel::info, "ui", "Show only one track", { { "part", std::to_string (part + 1) } });
+        refreshTracks();
+        scheduleSongSave();
+    }
+
+    void showAllParts()
+    {
+        if (song_ == nullptr)
+            return;
+        partShown_.assign (song_->parts.size(), true);
+        refreshTracks();
+        scheduleSongSave();
+    }
+
+    void clearSolos()
+    {
+        if (song_ == nullptr)
+            return;
+        soloParts_.assign (song_->parts.size(), false);
+        log_->write (LogLevel::info, "ui", "All Solo cleared");
+        lesson_->setMutedParts (heardMutes());
+        refreshTracks();
+        scheduleSongSave();
+    }
+
+    void moveTrack (std::size_t part, int delta)
+    {
+        if (song_ == nullptr || part >= song_->parts.size())
+            return;
+        const auto n = song_->parts.size();
+        if (partOrder_.size() != n)
+        {
+            partOrder_.resize (n);
+            for (std::size_t i = 0; i < n; ++i)
+                partOrder_[i] = static_cast<int> (i);
+        }
+        // Positions are a permutation: swap with the neighbour in that direction.
+        const int target = partOrder_[part] + delta;
+        for (std::size_t j = 0; j < n; ++j)
+            if (partOrder_[j] == target)
+            {
+                std::swap (partOrder_[j], partOrder_[part]);
+                break;
+            }
+        refreshTracks();
+        scheduleSongSave();
+    }
+
+    /** Parts with a note sounding at the playhead (and the song running). */
+    std::vector<bool> partActivity (double position, bool running) const
+    {
+        std::vector<bool> active (song_ != nullptr ? song_->parts.size() : 0, false);
+        if (song_ == nullptr || ! running)
+            return active;
+        const auto& notes = song_->timeline.notes();
+        auto it = std::upper_bound (notes.begin(), notes.end(), position,
+                                    [] (double t, const timeline::Note& n) { return t < n.startSeconds; });
+        for (int k = 0; it != notes.begin() && k < 2000; ++k)
+        {
+            --it;
+            if (it->startSeconds < position - 12.0)
+                break;
+            if (it->endSeconds > position)
+                if (const auto part = song_->partIndexOf (*it); part >= 0 && static_cast<std::size_t> (part) < active.size())
+                    active[static_cast<std::size_t> (part)] = true;
+        }
+        return active;
     }
 
     void setPartFlag (std::vector<bool>& flags, std::size_t part, bool on, const char* what)
@@ -901,6 +1101,8 @@ private:
                 scheduleSongSave();
             };
             i.soundChanged = [this] (std::size_t part, int soundId) { instruments_->choosePart (part, soundId); };
+            i.presetChosen = [this] (std::size_t part, int bank, int program) { instruments_->choosePartPreset (part, bank, program); };
+            i.useMidiInstrument = [this] (std::size_t part) { instruments_->useMidiInstrument (part); };
             i.volumeChanged = [this] (std::size_t part, double volume) {
                 if (song_ == nullptr || part >= song_->parts.size())
                     return;
@@ -914,12 +1116,24 @@ private:
             i.openEditor = [this] (std::size_t part) { instruments_->showEditor (static_cast<int> (part)); };
             i.openMainEditor = [this] { instruments_->showEditor(); };
             i.openSoundSettings = [this] { openSettings (ui::SettingsPage::sounds); };
-            i.columnsChanged = [this] (const std::string& columns) {
-                settings_.visual.tracksColumns = columns;
+            i.selectPart = [this] (int part) { selectPart (part); };
+            i.colourChanged = [this] (std::size_t part, std::optional<std::uint32_t> colour) { setPartColour (part, colour); };
+            i.visibleChanged = [this] (std::size_t part, bool shown) { setPartShown (part, shown); };
+            i.showOnly = [this] (std::size_t part) { showOnlyPart (part); };
+            i.showAll = [this] { showAllParts(); };
+            i.clearSolos = [this] { clearSolos(); };
+            i.moveTrack = [this] (std::size_t part, int delta) { moveTrack (part, delta); };
+            i.masterChanged = [this] (double gain) {
+                audio_->setGain (static_cast<float> (gain));
+                masterGain_ = gain;
+                content_->setVolume (static_cast<float> (gain));
+            };
+            i.inspectorShownChanged = [this] (bool shown) {
+                settings_.visual.tracksInspector = shown;
                 scheduleSettingsSave();
             };
             tracks_ui_ = new ui::TracksComponent (std::move (i));
-            tracks_ui_->restoreColumns (settings_.visual.tracksColumns);
+            tracks_ui_->setInspectorShown (settings_.visual.tracksInspector);
             tracks_ui_->setSound (instruments_->view());
             tracksWindow_ = std::make_unique<TracksWindow> (TRANS ("Tracks and instruments"), tracks_ui_, [this] (juce::Rectangle<int> b) {
                 settings_.visual.tracksWindow = (juce::String (b.getX()) + " " + juce::String (b.getY()) + " " + juce::String (b.getWidth())
@@ -1164,7 +1378,9 @@ private:
     void applyManifest()
     {
         const auto& m = manifest_;
-        const auto& parts = song_->parts;
+        // Held here: song_ is replaced below and parts must stay valid.
+        const auto original = song_;
+        const auto& parts = original->parts;
 
         // Hands: only parts the user changed were saved; others keep the guess.
         auto song = *song_;
@@ -1184,16 +1400,35 @@ private:
         mutedParts_.assign (parts.size(), false);
         soloParts_.assign (parts.size(), false);
         partVolumes_.assign (parts.size(), 1.0);
+        partColours_.assign (parts.size(), std::nullopt);
+        partShown_.assign (parts.size(), true);
+        partOrder_.clear();
+        selectedPart_ = -1;
+        std::vector<int> savedOrder (parts.size(), -1);
         std::vector<int> channels;
         std::vector<InstrumentService::TrackSound> sounds (parts.size());
         for (auto& sound : sounds)
             sound.choice.kind = "main"; // tracks without a saved choice follow the main sound
+        std::vector<bool> used (m.tracks.size(), false);
         for (std::size_t i = 0; i < parts.size(); ++i)
         {
             channels.push_back (parts[i].channel);
-            if (i >= m.tracks.size() || m.tracks[i].track != parts[i].track || m.tracks[i].channel != parts[i].channel)
+            // A track is known by its place in the file and its channel, not by
+            // its name or row: two tracks may share a name.
+            std::size_t found = m.tracks.size();
+            for (std::size_t k = 0; k < m.tracks.size(); ++k)
+                if (! used[k] && m.tracks[k].track == parts[i].track && m.tracks[k].channel == parts[i].channel)
+                {
+                    found = k;
+                    break;
+                }
+            if (found == m.tracks.size())
                 continue;
-            const auto& saved = m.tracks[i];
+            used[found] = true;
+            const auto& saved = m.tracks[found];
+            partColours_[i] = ui::parseHexColour (saved.colour);
+            partShown_[i] = saved.visible;
+            savedOrder[i] = saved.order;
             mutedParts_[i] = saved.muted;
             soloParts_[i] = saved.solo;
             partVolumes_[i] = std::clamp (saved.volume, 0.0, 1.0);
@@ -1203,6 +1438,17 @@ private:
                 const auto bytes = settings::readTrackState (songFolder_, saved.stateFile);
                 sounds[i].state.append (bytes.data(), bytes.size());
             }
+        }
+
+        // Mixer order: only a complete saved order is used, otherwise file order.
+        {
+            auto sorted = savedOrder;
+            std::sort (sorted.begin(), sorted.end());
+            bool complete = true;
+            for (std::size_t i = 0; i < sorted.size(); ++i)
+                complete = complete && sorted[i] == static_cast<int> (i);
+            if (complete)
+                partOrder_ = savedOrder;
         }
 
         // The song's choices become the current ones; "wait when a song is
@@ -1261,6 +1507,10 @@ private:
         mutedParts_.clear();
         soloParts_.clear();
         partVolumes_.clear();
+        partColours_.clear();
+        partShown_.clear();
+        partOrder_.clear();
+        selectedPart_ = -1;
         content_->setSong (nullptr);
         refreshTracks();
         content_->setRecentFiles (settings_.recentFiles);
@@ -1303,6 +1553,9 @@ private:
             t.muted = i < mutedParts_.size() && mutedParts_[i];
             t.solo = i < soloParts_.size() && soloParts_[i];
             t.volume = i < partVolumes_.size() ? partVolumes_[i] : 1.0;
+            t.colour = i < partColours_.size() && partColours_[i] ? ui::hexColour (*partColours_[i]) : std::string();
+            t.visible = i >= partShown_.size() || partShown_[i];
+            t.order = i < partOrder_.size() ? partOrder_[i] : -1;
             if (i < sounds.size())
             {
                 t.sound = sounds[i].choice;
@@ -1569,8 +1822,26 @@ private:
         pv.countInBeat = practice.countInBeat;
         pv.countInBeats = practice.countInBeats;
         pv.gateNumber = practice.gateNumber;
+        pv.gateOnsetSeconds = practice.gateOnsetSeconds;
         pv.gateCount = practice.gateCount;
         content_->setPractice (pv);
+
+        // The practice state decides who plays each track: rebuild when it changes.
+        const auto key = (static_cast<std::uint64_t> (practice.practising) << 8) | (static_cast<std::uint64_t> (practice.mode) << 4)
+                         | (static_cast<std::uint64_t> (practice.accompaniment.playOtherPianoPart) << 1)
+                         | static_cast<std::uint64_t> (practice.accompaniment.playBacking) | (1ull << 20);
+        if (key != hearingKey_)
+        {
+            hearingKey_ = key;
+            refreshTracks();
+        }
+        if (tracks_ui_ != nullptr && tracksWindow_ != nullptr && tracksWindow_->isVisible())
+        {
+            const bool running = snap.state == audio::PlaybackState::playing;
+            tracks_ui_->setActivity (partActivity (snap.positionSeconds, running));
+            const auto [left, right] = audio_->takePeaks();
+            tracks_ui_->setMaster ({ masterGain_, left, right });
+        }
     }
 
     void rememberInput (const midi_io::MidiDeviceInfo& device)
@@ -1620,6 +1891,12 @@ private:
     std::vector<std::size_t> lastStateHashes_; ///< plug-in states already on disk
     double songSaveDueMs_ = 0.0;
     std::vector<bool> soloParts_;     ///< tracks heard alone (with the other solo tracks)
+    std::vector<std::optional<std::uint32_t>> partColours_; ///< chosen by the user; nullopt = automatic
+    std::vector<bool> partShown_;     ///< the eye: drawn on the piano roll
+    std::vector<int> partOrder_;      ///< place in the mixer
+    int selectedPart_ = -1;           ///< chosen in the mixer or the legend; view only
+    double masterGain_ = 0.8;
+    std::uint64_t hearingKey_ = 0;    ///< practice state the track list was built for
     std::unique_ptr<TracksWindow> tracksWindow_;
     ui::TracksComponent* tracks_ui_ = nullptr; // owned by tracksWindow_
     std::vector<bool> mutedParts_;    ///< "Other tracks" the user switched off

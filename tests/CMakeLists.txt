@@ -5,6 +5,8 @@ add_executable(pianoassist_tests
     unit/TimelineTests.cpp
     unit/PracticeProfileTests.cpp
     unit/LatencyTests.cpp
+    unit/TrackColourTests.cpp
+    unit/TrackSoundTests.cpp
     unit/SettingsTests.cpp
     unit/RotatingLogTests.cpp
     unit/Utf8PathTests.cpp

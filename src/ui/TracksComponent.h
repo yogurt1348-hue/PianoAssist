@@ -4,14 +4,17 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <cstdint>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace pianoassist::ui
 {
 
-/** One track of the song as the tracks window shows it. */
+/** One track of the song as the mixer and the piano roll show it. */
 struct TrackRowView
 {
     std::string label;       ///< "Track 2 'Piano' · ch 1"
@@ -27,13 +30,50 @@ struct TrackRowView
     bool muted = false;
     bool solo = false;
     bool hasEditor = false;  ///< the track has its own plug-in with a window
+    std::string presetName;  ///< the preset chosen instead of the file's instrument, empty when none
+    bool presetDrums = false;
+    std::string soundProblem; ///< the chosen sound or preset is missing
+
+    std::uint32_t colour = 0xff7fcf95; ///< 0xAARRGGBB, what the track is drawn in
+    bool autoColour = true;  ///< the colour comes from the instrument
+    bool visible = true;     ///< drawn on the piano roll (the "eye"); never changes sound or practice
+    bool heard = true;       ///< the app plays it now: Mute, Solo, role and the accompaniment switches together
+    bool checked = false;    ///< its notes are required while practising (played by the learner)
+    int order = 0;           ///< place in the mixer
+
+    /** Why the track is quiet: what the strip and the roll explain. */
+    enum Quiet { audible = 0, mutedQuiet, otherSolo, backingOff, otherHandOff, playedByYou, excludedQuiet };
+    int quiet = audible;
+
+    juce::String displayName() const
+    {
+        return trackName.empty() ? juce::String::fromUTF8 (instrument.c_str()) : juce::String::fromUTF8 (trackName.c_str());
+    }
 };
 
-/** "Tracks and instruments": a resizable list with the columns Track, Role,
-    Sound, Volume, Mute, Solo, and details of the selected track below.
+/** One preset the track's source offers (SoundFont bank and program, or a VST3 program). */
+struct PresetView
+{
+    int bank = -1;
+    int program = 0;
+    std::string name;
+    bool drums = false;
+};
+
+/** Main output, for the mixer's Master strip. */
+struct MasterView
+{
+    double gain = 0.8;   ///< main volume 0-1
+    float peakLeft = 0.0f, peakRight = 0.0f; ///< measured output level since the last update, 0-1
+};
+
+/** "Tracks and instruments" as a mixer: Master on the left, then one
+    vertical channel per track (colour, name, Mute, Solo, volume fader, MIDI
+    activity), and an inspector for the selected track on the right.
+
     Role decides who plays a track and whether its notes are checked; Mute
-    and Solo only decide what is heard. */
-class TracksComponent final : public juce::Component, private juce::TableListBoxModel
+    and Solo only decide what is heard; the eye only what the roll shows. */
+class TracksComponent final : public juce::Component, private juce::Timer
 {
 public:
     struct Intents
@@ -46,50 +86,77 @@ public:
         std::function<void (std::size_t part)> openEditor; ///< the track's own plug-in window
         std::function<void()> openMainEditor;
         std::function<void()> openSoundSettings;
-        std::function<void (const std::string& columns)> columnsChanged;
+        std::function<void (int part)> selectPart;          ///< -1 = none; changes nothing that sounds
+        std::function<void (std::size_t part, std::optional<std::uint32_t> colour)> colourChanged; ///< nullopt = automatic
+        std::function<void (std::size_t part, bool visible)> visibleChanged;
+        std::function<void (std::size_t part)> showOnly;
+        std::function<void()> showAll;
+        std::function<void()> clearSolos;
+        std::function<void (std::size_t part, int delta)> moveTrack; ///< in the mixer order
+        std::function<void (double gain)> masterChanged;
+        std::function<void (bool shown)> inspectorShownChanged;
+        std::function<void (std::size_t part, int bank, int program)> presetChosen;
+        std::function<void (std::size_t part)> useMidiInstrument;
     };
 
     explicit TracksComponent (Intents intents);
     ~TracksComponent() override;
 
     void setRows (std::vector<TrackRowView> rows);
+    void setSelected (int part);
     void setSound (const SoundView& view);
-    std::string columnsState() const;
-    void restoreColumns (const std::string& state);
+    void setMaster (const MasterView& view);
+    /** Per track: a note of it is playing now (from the song, not audio). */
+    void setActivity (const std::vector<bool>& active);
+    void setInspectorShown (bool shown);
+    /** Presets of the selected track's source. sourceKind: main, builtIn, soundFont, plugin. */
+    void setPresets (int part, std::vector<PresetView> presets, std::string sourceKind);
 
     void paint (juce::Graphics& g) override;
     void resized() override;
-    void lookAndFeelChanged() override;
 
     /** Short text for the side panel: who plays what. */
     static juce::String summary (const std::vector<TrackRowView>& rows);
     static juce::String roleName (int assignment);
+    static juce::String quietText (const TrackRowView& row);
+
+    static constexpr int stripWidth = 128;
+    static constexpr int inspectorWidth = 320;
 
 private:
-    enum Column { trackColumn = 1, roleColumn, soundColumn, volumeColumn, muteColumn, soloColumn };
+    class Strip;
+    class MasterStrip;
+    class Inspector;
+    friend class Strip;
+    friend class Inspector;
 
-    int getNumRows() override { return static_cast<int> (rows_.size()); }
-    void paintRowBackground (juce::Graphics& g, int row, int width, int height, bool selected) override;
-    void paintCell (juce::Graphics& g, int row, int column, int width, int height, bool selected) override;
-    juce::Component* refreshComponentForCell (int row, int column, bool selected, juce::Component* existing) override;
-    juce::String getCellTooltip (int row, int column) override;
-    void selectedRowsChanged (int row) override;
-    void columnResized();
-    void updateDetails();
+    void timerCallback() override;
+    void rebuildStrips();
+    void showColourMenu (std::size_t part, juce::Component& anchor);
+    void showStripMenu (std::size_t part);
     void fillSoundBox (juce::ComboBox& box) const;
     juce::String soundName (int soundId) const;
+    juce::String routingText (std::size_t part) const;
 
-    class HeaderListener;
     Intents intents_;
     std::vector<TrackRowView> rows_;
+    std::vector<bool> activity_;
     SoundView sound_;
-    juce::Label hint_;
-    juce::TableListBox table_ { "tracks", this };
-    std::unique_ptr<HeaderListener> headerListener_;
+    int selected_ = -1;
+    bool inspectorShown_ = true;
 
-    // Details of the selected track
-    juce::Label detailTitle_, detailRole_, detailSound_, detailInfo_;
-    juce::TextButton editorButton_, mainEditorButton_, soundSettingsButton_;
+    juce::Label hint_;
+    juce::TextButton clearSolos_, showAll_, inspectorToggle_;
+    std::unique_ptr<MasterStrip> master_;
+    juce::Viewport stripsView_;
+    juce::Component stripsContent_;
+    juce::OwnedArray<Strip> strips_;
+    std::unique_ptr<Inspector> inspector_;
+    juce::Viewport inspectorView_;
+    int presetsPart_ = -1;
+    std::vector<PresetView> presets_;
+    std::string presetsSource_;
+    juce::Label empty_;
 };
 
 } // namespace pianoassist::ui

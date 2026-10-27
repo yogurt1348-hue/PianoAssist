@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <limits>
+#include <map>
 
 #if defined(_MSC_VER)
     #pragma warning(push, 0)
@@ -46,13 +48,77 @@ constexpr int maxVoices = 256;
 constexpr int drumChannel = 9; // MIDI channel 10
 } // namespace
 
+namespace
+{
+std::uint32_t readU32 (const std::uint8_t* p) noexcept
+{
+    return static_cast<std::uint32_t> (p[0]) | static_cast<std::uint32_t> (p[1]) << 8 | static_cast<std::uint32_t> (p[2]) << 16
+         | static_cast<std::uint32_t> (p[3]) << 24;
+}
+
+/** Preset names exactly as in the file's phdr records. TinySoundFont keeps
+    only 19 of the 20 characters, which cuts names such as "Acoustic Grand
+    Piano"; these are used for display and search instead. */
+std::map<std::pair<int, int>, std::string> fullPresetNames (const std::vector<std::uint8_t>& bytes)
+{
+    std::map<std::pair<int, int>, std::string> names;
+    const auto* data = bytes.data();
+    const std::size_t size = bytes.size();
+    if (size < 12 || std::memcmp (data, "RIFF", 4) != 0 || std::memcmp (data + 8, "sfbk", 4) != 0)
+        return names;
+    // Top-level LIST chunks, then the phdr chunk inside LIST pdta.
+    std::size_t pos = 12;
+    while (pos + 12 <= size)
+    {
+        const std::size_t length = readU32 (data + pos + 4);
+        if (length > size - pos - 8)
+            break;
+        if (std::memcmp (data + pos, "LIST", 4) == 0 && std::memcmp (data + pos + 8, "pdta", 4) == 0)
+        {
+            std::size_t sub = pos + 12;
+            const std::size_t end = pos + 8 + length;
+            while (sub + 8 <= end)
+            {
+                const std::size_t subLength = readU32 (data + sub + 4);
+                if (subLength > end - sub - 8)
+                    break;
+                if (std::memcmp (data + sub, "phdr", 4) == 0)
+                {
+                    constexpr std::size_t record = 38;
+                    const std::size_t count = subLength / record;
+                    for (std::size_t i = 0; i + 1 < count; ++i) // the last record is the terminator
+                    {
+                        const auto* r = data + sub + 8 + i * record;
+                        std::string name (reinterpret_cast<const char*> (r), 20);
+                        name = name.substr (0, name.find ('\0'));
+                        while (! name.empty() && name.back() == ' ')
+                            name.pop_back();
+                        for (auto& c : name)
+                            if (static_cast<unsigned char> (c) < 32 || static_cast<unsigned char> (c) > 126)
+                                c = '?'; // the format has no encoding; keep the text valid UTF-8
+                        const int program = r[20] | r[21] << 8;
+                        const int bank = r[22] | r[23] << 8;
+                        names.emplace (std::make_pair (bank, program), std::move (name));
+                    }
+                    return names;
+                }
+                sub += 8 + subLength + (subLength & 1);
+            }
+        }
+        pos += 8 + length + (length & 1);
+    }
+    return names;
+}
+} // namespace
+
 struct SoundFontRenderer::Template
 {
-    explicit Template (tsf* f) : font (f) {}
+    Template (tsf* f, std::map<std::pair<int, int>, std::string> n) : font (f), names (std::move (n)) {}
     ~Template() { tsf_close (font); }
     Template (const Template&) = delete;
     Template& operator= (const Template&) = delete;
     tsf* font;
+    std::map<std::pair<int, int>, std::string> names;
 };
 
 Result<std::unique_ptr<SoundFontRenderer>> SoundFontRenderer::load (const std::filesystem::path& path)
@@ -79,7 +145,7 @@ Result<std::unique_ptr<SoundFontRenderer>> SoundFontRenderer::fromMemory (const 
         tsf_close (font);
         return R::fail ("'" + name + "' contains no instruments");
     }
-    auto source = std::make_shared<Template> (font);
+    auto source = std::make_shared<Template> (font, fullPresetNames (bytes));
     auto* player = tsf_copy (font);
     if (player == nullptr)
         return R::fail ("Not enough memory for '" + name + "'");
@@ -108,7 +174,9 @@ std::vector<SoundFontPreset> SoundFontRenderer::presets() const
     for (int i = 0; i < f->presetNum; ++i)
     {
         const auto& p = f->presets[i];
-        SoundFontPreset preset { p.bank, p.preset, p.presetName, p.bank == 128 };
+        const auto full = source_->names.find ({ p.bank, p.preset });
+        SoundFontPreset preset { p.bank, p.preset, full != source_->names.end() && ! full->second.empty() ? full->second : p.presetName,
+                                 p.bank == 128 };
         const auto lower = lowerCase (preset.name);
         if (lower.find ("drum") != std::string::npos || lower.find ("kit") != std::string::npos
             || lower.find ("perc") != std::string::npos)

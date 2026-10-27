@@ -163,7 +163,7 @@ MainComponent::MainComponent (Intents intents)
 
     // Roll, tabs and the empty state
     tabs_.addTab (TRANS ("My parts"), juce::Colours::transparentBlack, 0);
-    tabs_.addTab (TRANS ("Other tracks"), juce::Colours::transparentBlack, 1);
+    tabs_.addTab (TRANS ("All tracks"), juce::Colours::transparentBlack, 1);
     tabs_.setCurrentTabIndex (0, false);
     tabs_.addChangeListener (this);
     tabs_.setTitle (TRANS ("Piano roll view"));
@@ -181,10 +181,45 @@ MainComponent::MainComponent (Intents intents)
             if (intents_.loopChanged)
                 intents_.loopChanged (true, start, end);
         };
+        roll->onSelectPart = [this] (int part) { if (intents_.selectPart) intents_.selectPart (part); };
+        roll->onShowOnlyPart = [this] (int part) {
+            if (intents_.showOnlyPart && part >= 0)
+                intents_.showOnlyPart (static_cast<std::size_t> (part));
+        };
+        roll->onShowAllParts = [this] { if (intents_.showAllParts) intents_.showAllParts(); };
         addChildComponent (roll);
     }
     roll_.setTitle (TRANS ("Piano roll of your parts"));
-    tracksRoll_.setTitle (TRANS ("Piano roll of the other tracks"));
+    tracksRoll_.setTitle (TRANS ("Piano roll of all tracks"));
+    tracksRoll_.setColourByTrack (true);
+    legend_.onVisibleChanged = [this] (int part, bool visible) {
+        if (intents_.partVisibleChanged && part >= 0)
+            intents_.partVisibleChanged (static_cast<std::size_t> (part), visible);
+    };
+    legend_.onSelect = [this] (int part) { if (intents_.selectPart) intents_.selectPart (part); };
+    legend_.onShowOnly = [this] (int part) {
+        if (intents_.showOnlyPart && part >= 0)
+            intents_.showOnlyPart (static_cast<std::size_t> (part));
+    };
+    legend_.onShowAll = [this] { if (intents_.showAllParts) intents_.showAllParts(); };
+    legend_.onClearSolos = [this] { if (intents_.clearSolos) intents_.clearSolos(); };
+    legend_.onColourByTrack = [this] (bool byTrack) {
+        setViewOptions (byTrack, hideDimmed_, pianoOnly_);
+        if (intents_.colourByTrackChanged)
+            intents_.colourByTrackChanged (byTrack);
+    };
+    legend_.onMore = [this] { if (intents_.showTracksWindow) intents_.showTracksWindow(); };
+    legend_.onHideDimmed = [this] (bool hide) {
+        setViewOptions (colourByTrack_, hide, pianoOnly_);
+        if (intents_.hideDimmedChanged)
+            intents_.hideDimmedChanged (hide);
+    };
+    legend_.onPianoOnly = [this] (bool only) {
+        setViewOptions (colourByTrack_, hideDimmed_, only);
+        if (intents_.pianoOnlyChanged)
+            intents_.pianoOnlyChanged (only);
+    };
+    addChildComponent (legend_);
     tracksEmpty_.setText (TRANS ("This song has no other tracks: every part is piano."), juce::dontSendNotification);
     tracksEmpty_.setJustificationType (juce::Justification::centred);
     addChildComponent (tracksEmpty_);
@@ -441,15 +476,123 @@ void MainComponent::toggleLoop()
         intents_.loopChanged (loopEnabled_, loopStart_, loopEnd_);
 }
 
-void MainComponent::setTracks (const std::vector<TrackRowView>& rows)
+void MainComponent::setTracks (const std::vector<TrackRowView>& rows, int selected)
 {
     tracks_ = rows;
+    selectedPart_ = selected;
     tracksSummary_.setText (TracksComponent::summary (tracks_), juce::dontSendNotification);
-    int backingCount = 0;
-    for (const auto& r : tracks_)
-        backingCount += r.assignment == 3 ? 1 : 0;
-    tabs_.setTabName (1, backingCount > 0 ? TRANS ("Other tracks") + " (" + juce::String (backingCount) + ")" : TRANS ("Other tracks"));
+    tabs_.setTabName (1, tracks_.empty() ? TRANS ("All tracks") : TRANS ("All tracks") + " (" + juce::String (tracks_.size()) + ")");
+    refreshRollStyles();
     resized();
+}
+
+void MainComponent::setViewOptions (bool colourByTrack, bool hideDimmed, bool pianoOnly)
+{
+    colourByTrack_ = colourByTrack;
+    hideDimmed_ = hideDimmed;
+    pianoOnly_ = pianoOnly;
+    refreshRollStyles();
+    resized();
+}
+
+void MainComponent::refreshRollStyles()
+{
+    if (! song_)
+    {
+        legend_.setItems ({}, tab_, colourByTrack_, pianoOnly_, hideDimmed_, false);
+        return;
+    }
+    const auto n = song_->parts.size();
+    const bool rowsMatch = tracks_.size() == n;
+    std::vector<PianoRollComponent::PartStyle> styles (n);
+    std::vector<bool> pianoParts (n, false);
+    std::vector<RollLegend::Item> items;
+    bool anySolo = false;
+    for (const auto& r : tracks_)
+        anySolo = anySolo || r.solo;
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        const auto& part = song_->parts[i];
+        const int assignment = rowsMatch ? tracks_[i].assignment : part.assignment;
+        const bool piano = isPianoAssignment (assignment);
+        pianoParts[i] = piano;
+        auto& style = styles[i];
+        style.hand = assignment == 0 ? 1 : assignment == 1 ? 2 : assignment == 2 ? 3 : 0;
+        style.selected = static_cast<int> (i) == selectedPart_;
+        if (rowsMatch)
+        {
+            const auto& r = tracks_[i];
+            style.colour = juce::Colour (r.colour);
+            style.name = r.displayName();
+            style.instrument = toJuce (r.instrument);
+            style.visible = r.visible;
+            style.bright = r.heard || r.checked;
+        }
+        else
+        {
+            style.name = toJuce (part.trackName.empty() ? part.instrument : part.trackName);
+            style.instrument = toJuce (part.instrument);
+        }
+        roll_.setPartVisible (i, piano);
+        tracksRoll_.setPartVisible (i, ! pianoOnly_ || piano);
+    }
+    // Same names (two "Piccolo" tracks): add the track number so they can be told apart without colour.
+    if (rowsMatch)
+        for (std::size_t i = 0; i < n; ++i)
+            for (std::size_t j = 0; j < n; ++j)
+                if (i != j && tracks_[i].displayName() == tracks_[j].displayName())
+                {
+                    styles[i].name << " (" << TRANS ("track") << " " << tracks_[i].track << ")";
+                    break;
+                }
+    roll_.setPartStyles (styles);
+    tracksRoll_.setPartStyles (styles);
+    roll_.setColourByTrack (colourByTrack_);
+    roll_.setHideDimmed (hideDimmed_);
+    tracksRoll_.setHideDimmed (hideDimmed_);
+
+    // Legend: the tracks this tab can show, in the mixer's order.
+    std::vector<std::size_t> order;
+    for (std::size_t i = 0; i < n; ++i)
+    {
+        if (tab_ == 0 ? pianoParts[i] : (! pianoOnly_ || pianoParts[i]))
+            order.push_back (i);
+    }
+    if (rowsMatch)
+        std::stable_sort (order.begin(), order.end(), [this] (std::size_t a, std::size_t b) { return tracks_[a].order < tracks_[b].order; });
+    for (const auto i : order)
+    {
+        const auto& style = styles[i];
+        RollLegend::Item item;
+        item.part = static_cast<int> (i);
+        item.colour = style.colour;
+        item.name = style.name;
+        item.visible = style.visible;
+        item.bright = style.bright;
+        item.selected = style.selected;
+        item.hand = style.hand;
+        if (rowsMatch)
+        {
+            const auto& r = tracks_[i];
+            item.muted = r.muted;
+            item.solo = r.solo;
+            item.checked = r.checked;
+            juce::String tip = style.name + "\n" + style.instrument + "  ·  " + TRANS ("track") + " " + juce::String (r.track) + "  ·  "
+                               + TRANS ("channel") + " " + juce::String (r.channel) + "\n" + TracksComponent::roleName (r.assignment);
+            const auto quiet = TracksComponent::quietText (r);
+            if (quiet.isNotEmpty())
+                tip << "\n" << quiet;
+            if (r.checked && ! r.heard)
+                tip << "\n" << TRANS ("Not heard, but you still have to play it");
+            tip << "\n" << TRANS ("Click: select. Right-click: show only this track.");
+            item.tooltip = tip;
+        }
+        items.push_back (std::move (item));
+    }
+    legend_.setItems (std::move (items), tab_, colourByTrack_, pianoOnly_, hideDimmed_, anySolo);
+    // The legend may need another line now (more chips, or "Clear all Solo").
+    if (legend_.isVisible() && legend_.getWidth() > 0 && legend_.heightFor (legend_.getWidth()) != legend_.getHeight())
+        resized();
 }
 
 void MainComponent::setLayoutChoices (int sidebarWidth, bool collapsed, bool follow)
@@ -562,6 +705,9 @@ void MainComponent::setPractice (const PracticeView& view)
     otherPartToggle_.setEnabled (view.mode != 0);
     backingToggle_.setToggleState (view.playBacking, juce::dontSendNotification);
     board_.setView (view);
+    roll_.setGateHighlight (view.practising ? view.gateOnsetSeconds : -1.0, view.required, view.matched);
+    roll_.setWrongPitches (view.wrong);
+    tracksRoll_.setWrongPitches (view.wrong);
     refreshModeBadge();
     refreshStatus();
 }
@@ -642,13 +788,9 @@ void MainComponent::setSong (std::shared_ptr<const PianoRollView> song)
             notices << (notices.isEmpty() ? "" : "  ") << toJuce (notice);
     notices_.setText (notices, juce::dontSendNotification);
 
-    if (song_)
-        for (std::size_t i = 0; i < song_->parts.size(); ++i)
-        {
-            const bool piano = isPianoAssignment (song_->parts[i].assignment);
-            roll_.setPartVisible (i, piano);
-            tracksRoll_.setPartVisible (i, ! piano);
-        }
+    if (changed && song_ && tracks_.size() != song_->parts.size())
+        tracks_.clear();
+    refreshRollStyles();
     if (changed)
         setLoop (false, 0.0, 0.0);
     if (! song_)
@@ -764,11 +906,9 @@ void MainComponent::showTab (int index)
     tabs_.setVisible (hasSong);
     roll_.setVisible (hasSong && mine);
     tracksRoll_.setVisible (hasSong && ! mine);
-    bool anyOther = false;
-    if (song_)
-        for (const auto& part : song_->parts)
-            anyOther = anyOther || part.assignment == 3;
-    tracksEmpty_.setVisible (hasSong && ! mine && ! anyOther);
+    tracksEmpty_.setVisible (false);
+    legend_.setVisible (hasSong);
+    refreshRollStyles();
     emptyOpenButton_.setVisible (! hasSong);
     emptyHint_.setVisible (! hasSong);
     for (auto* button : recentButtons_)
@@ -941,6 +1081,9 @@ void MainComponent::resized()
         zoomOut_.setBounds (controls.removeFromRight (34));
         tabs_.setBounds (tabsRow.withWidth (tabsWidth));
         inner.removeFromTop (6);
+        const int legendHeight = std::min (legend_.heightFor (inner.getWidth()), std::max (56, inner.getHeight() / 3)); // at least two lines
+        legend_.setBounds (inner.removeFromTop (legendHeight));
+        inner.removeFromTop (6);
     }
     roll_.setBounds (inner);
     tracksRoll_.setBounds (inner);
@@ -1083,7 +1226,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
         case 1: // View
         {
             menu.addItem (TRANS ("My parts"), hasSong, tab_ == 0, [this] { showTab (0); });
-            menu.addItem (TRANS ("Other tracks"), hasSong, tab_ == 1, [this] { showTab (1); });
+            menu.addItem (TRANS ("All tracks"), hasSong, tab_ == 1, [this] { showTab (1); });
             menu.addItem (TRANS ("Tracks and instruments..."), hasSong, false, call (intents_.showTracksWindow));
             menu.addItem (TRANS ("Side panel"), true, ! sidebarCollapsed_, [this] { setSidebar (sidebarWidth_, ! sidebarCollapsed_, true); });
             menu.addItem (TRANS ("Standard side panel width"), true, false, [this] { setSidebar (defaultSidebarWidth, false, true); });

@@ -22,6 +22,9 @@ struct TrackState
     double volume = 1.0;     ///< 0-1, scales the track's note velocities
     SoundSettings sound;     ///< kind "main" = the global main sound
     std::string stateFile;   ///< VST3 state file inside the song folder, relative; empty when none
+    std::string colour;      ///< "#RRGGBB" chosen by the user; empty = automatic from the instrument
+    bool visible = true;     ///< shown on the piano roll (only the view; sound and practice ignore it)
+    int order = -1;          ///< place in the mixer, -1 = file order
 
     friend bool operator== (const TrackState&, const TrackState&) = default;
 };

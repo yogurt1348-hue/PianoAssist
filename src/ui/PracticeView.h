@@ -36,6 +36,7 @@ struct PracticeView
     bool countIn = false;   ///< one bar of clicks before playing
     int countInBeat = 0;    ///< running count-in click, 0 when none
     int countInBeats = 0;
+    double gateOnsetSeconds = -1.0;     ///< song time of the current step, -1 when none
     std::size_t gateNumber = 0;
     std::size_t gateCount = 0;
 };

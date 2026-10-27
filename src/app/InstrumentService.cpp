@@ -250,7 +250,7 @@ juce::MemoryBlock InstrumentService::readStateFile (const std::string& pluginId)
     return {};
 }
 
-bool InstrumentService::realise (Slot& slot, const juce::MemoryBlock* state, bool drums)
+bool InstrumentService::realise (Slot& slot, const juce::MemoryBlock* state, bool drums, bool ownInstance)
 {
     slot.problem.clear();
     slot.handle = AudioService::builtInHandle;
@@ -272,8 +272,33 @@ bool InstrumentService::realise (Slot& slot, const juce::MemoryBlock* state, boo
                                .toStdString();
             return false;
         }
-        slot.handle = handle;
-        return true;
+        if (! ownInstance)
+        {
+            slot.handle = handle;
+            return true;
+        }
+        // A track: its own player of the file (shares the samples), so its
+        // preset and program changes never touch other tracks on its channel.
+        auto* shared = sharedSoundFont (choice.soundFontPath);
+        auto player = shared != nullptr ? shared->copy() : nullptr;
+        if (player == nullptr)
+        {
+            slot.problem = (TRANS ("Not enough memory for another SoundFont player.")).toStdString();
+            return false;
+        }
+        if (choice.presetProgram >= 0)
+        {
+            if (player->hasPreset (choice.presetBank, choice.presetProgram))
+                player->lockPreset (choice.presetBank, choice.presetProgram);
+            else
+                slot.problem = (TRANS ("Preset not in this SoundFont:") + " " + text (choice.presetName) + " ("
+                                + juce::String (choice.presetBank) + ":" + juce::String (choice.presetProgram + 1) + "). "
+                                + TRANS ("The track plays the file's own instrument until you choose another preset."))
+                                   .toStdString();
+        }
+        slot.handle = audio_.addInstrument (std::move (player));
+        slot.ownsHandle = true;
+        return slot.problem.empty();
     }
 
     // VST3: a separate instance for this slot.
@@ -310,6 +335,19 @@ bool InstrumentService::realise (Slot& slot, const juce::MemoryBlock* state, boo
         instance->setStateInformation (state->getData(), static_cast<int> (state->getSize()));
         log_.write (LogLevel::info, "sound", "Instrument settings restored", { { "bytes", std::to_string (state->getSize()) } });
     }
+    if (choice.presetProgram >= 0)
+    {
+        if (choice.presetProgram < instance->getNumPrograms())
+        {
+            instance->setCurrentProgram (choice.presetProgram);
+            log_.write (LogLevel::info, "sound", "Plug-in program chosen",
+                        { { "program", std::to_string (choice.presetProgram) }, { "name", choice.presetName } });
+        }
+        else
+            slot.problem = (TRANS ("This instrument has no program") + " " + juce::String (choice.presetProgram + 1) + ". "
+                            + TRANS ("Choose another in the list or in its window."))
+                               .toStdString();
+    }
     auto renderer = std::make_unique<audio::PluginInstrumentRenderer> (std::move (instance));
     renderer->setSendDrums (drums);
     slot.handle = audio_.addInstrument (std::move (renderer));
@@ -337,8 +375,11 @@ void InstrumentService::releaseUnusedSoundFonts()
     for (auto it = soundFonts_.begin(); it != soundFonts_.end();)
     {
         const int handle = it->second;
+        const auto& path = it->first;
         const bool used = main_.handle == handle
-                          || std::any_of (parts_.begin(), parts_.end(), [handle] (const Slot& s) { return s.handle == handle; });
+                          || std::any_of (parts_.begin(), parts_.end(), [handle, &path] (const Slot& s) {
+                                 return s.handle == handle || (s.choice.kind == "soundFont" && s.choice.soundFontPath == path);
+                             });
         if (! used && it->first != soundFontPath_)
         {
             audio_.removeInstrument (handle);
@@ -351,12 +392,15 @@ void InstrumentService::releaseUnusedSoundFonts()
 
 void InstrumentService::applyRouting()
 {
+    // Tracks on the main sound reach it on their own MIDI channel; a track
+    // with a sound of its own plays only there, whoever else shares its channel.
     std::array<int, 16> channels;
     channels.fill (-1);
-    for (std::size_t i = 0; i < parts_.size() && i < channels_.size(); ++i)
-        if (parts_[i].choice.kind != "main" && channels_[i] >= 0 && channels_[i] < 16)
-            channels[static_cast<std::size_t> (channels_[i])] = parts_[i].handle;
-    audio_.setRouting (main_.handle, channels);
+    std::vector<int> parts (parts_.size(), -1);
+    for (std::size_t i = 0; i < parts_.size(); ++i)
+        if (parts_[i].choice.kind != "main")
+            parts[i] = parts_[i].handle;
+    audio_.setRouting (main_.handle, channels, parts);
 }
 
 // --- main sound ---------------------------------------------------------------
@@ -572,7 +616,8 @@ void InstrumentService::setSong (std::vector<int> channels, std::vector<TrackSou
         slot.choice.kind = "main";
         if (i < sounds.size() && ! sounds[i].choice.kind.empty())
             slot.choice = sounds[i].choice;
-        if (slot.choice.kind != "main" && ! realise (slot, i < sounds.size() ? &sounds[i].state : nullptr, channels_[i] == drumChannel)
+        if (slot.choice.kind != "main"
+            && ! realise (slot, i < sounds.size() ? &sounds[i].state : nullptr, channels_[i] == drumChannel, true)
             && i < sounds.size())
             slot.keptState = sounds[i].state;
     }
@@ -586,18 +631,135 @@ void InstrumentService::choosePart (std::size_t part, int soundId)
 {
     if (part >= parts_.size())
         return;
-    auto& slot = parts_[part];
-    release (slot);
-    slot.keptState.reset();
-    slot.choice = choiceFor (soundId);
-    realise (slot, nullptr, channels_[part] == drumChannel);
-    applyRouting();
-    releaseUnusedSoundFonts();
+    auto choice = choiceFor (soundId);
+    // A SoundFont preset carries over to another SoundFont that has it.
+    const auto& old = parts_[part].choice;
+    if (choice.kind == "soundFont" && old.kind == "soundFont" && old.presetProgram >= 0)
+    {
+        choice.presetBank = old.presetBank;
+        choice.presetProgram = old.presetProgram;
+        choice.presetName = old.presetName;
+    }
+    replacePart (part, std::move (choice), nullptr);
+    const auto& slot = parts_[part];
     log_.write (LogLevel::info, "sound", "Track sound chosen",
                 { { "track", std::to_string (part + 1) }, { "kind", slot.choice.kind }, { "plugin", slot.choice.pluginName } });
     if (onTrackSoundsChanged)
         onTrackSoundsChanged();
     changed (slot.problem);
+}
+
+void InstrumentService::replacePart (std::size_t part, settings::SoundSettings choice, const juce::MemoryBlock* state)
+{
+    Slot next;
+    next.choice = std::move (choice);
+    juce::MemoryBlock keep;
+    if (state == nullptr && next.choice.kind == "plugin" && next.choice.pluginId == parts_[part].choice.pluginId)
+    {
+        // Same plug-in, other program: keep its settings.
+        if (auto* renderer = parts_[part].ownsHandle ? dynamic_cast<audio::PluginInstrumentRenderer*> (audio_.instrument (parts_[part].handle))
+                                                     : nullptr)
+            renderer->plugin().getStateInformation (keep);
+        state = &keep;
+    }
+    realise (next, state, channels_[part] == drumChannel, true);
+    if (editorPart_ == static_cast<int> (part))
+        closeEditor();
+    auto old = std::move (parts_[part]);
+    parts_[part] = std::move (next);
+    applyRouting(); // the track moves to its new instance; its notes are released on the old one
+    if (old.ownsHandle)
+        audio_.removeInstrument (old.handle);
+    releaseUnusedSoundFonts();
+}
+
+void InstrumentService::choosePartPreset (std::size_t part, int bank, int program)
+{
+    if (part >= parts_.size())
+        return;
+    auto choice = parts_[part].choice;
+    std::string name;
+    for (const auto& p : partPresets (part))
+        if (p.program == program && (choice.kind != "soundFont" || p.bank == bank))
+            name = p.name;
+    if (choice.kind != "soundFont" && choice.kind != "plugin")
+        return;
+    choice.presetBank = choice.kind == "soundFont" ? bank : -1;
+    choice.presetProgram = program;
+    choice.presetName = name;
+    replacePart (part, choice, nullptr);
+    log_.write (LogLevel::info, "sound", "Track preset chosen",
+                { { "track", std::to_string (part + 1) }, { "bank", std::to_string (bank) }, { "program", std::to_string (program) },
+                  { "name", name } });
+    if (onTrackSoundsChanged)
+        onTrackSoundsChanged();
+    changed (parts_[part].problem);
+}
+
+void InstrumentService::useMidiInstrument (std::size_t part)
+{
+    if (part >= parts_.size() || parts_[part].choice.presetProgram < 0)
+        return;
+    auto choice = parts_[part].choice;
+    choice.presetBank = choice.presetProgram = -1;
+    choice.presetName.clear();
+    replacePart (part, choice, nullptr);
+    log_.write (LogLevel::info, "sound", "Track uses the MIDI file's instrument", { { "track", std::to_string (part + 1) } });
+    if (onTrackSoundsChanged)
+        onTrackSoundsChanged();
+    changed (parts_[part].problem);
+}
+
+audio::SoundFontRenderer* InstrumentService::sharedSoundFont (const std::string& path) const
+{
+    const auto it = soundFonts_.find (path);
+    return it != soundFonts_.end() ? dynamic_cast<audio::SoundFontRenderer*> (audio_.instrument (it->second)) : nullptr;
+}
+
+std::vector<InstrumentService::Preset> InstrumentService::partPresets (std::size_t part) const
+{
+    std::vector<Preset> list;
+    if (part >= parts_.size())
+        return list;
+    const auto& slot = parts_[part];
+    if (slot.choice.kind == "soundFont")
+    {
+        if (auto* font = sharedSoundFont (slot.choice.soundFontPath))
+            for (const auto& p : font->presets())
+                list.push_back ({ p.bank, p.program, p.name, p.drums });
+    }
+    else if (slot.choice.kind == "plugin" && slot.ownsHandle)
+    {
+        if (auto* renderer = dynamic_cast<audio::PluginInstrumentRenderer*> (audio_.instrument (slot.handle)))
+        {
+            auto& plugin = renderer->plugin();
+            const int count = std::min (plugin.getNumPrograms(), 1024);
+            for (int i = 0; i < count && count > 1; ++i)
+            {
+                auto name = plugin.getProgramName (i).trim();
+                list.push_back ({ -1, i, (name.isEmpty() ? juce::String (i + 1) : name).toStdString(), false });
+            }
+        }
+    }
+    return list;
+}
+
+std::optional<InstrumentService::Preset> InstrumentService::partPreset (std::size_t part) const
+{
+    if (part >= parts_.size() || parts_[part].choice.presetProgram < 0)
+        return std::nullopt;
+    const auto& c = parts_[part].choice;
+    return Preset { c.presetBank, c.presetProgram, c.presetName, c.presetBank == 128 };
+}
+
+std::string InstrumentService::partSourceName (std::size_t part) const
+{
+    return part < parts_.size() ? parts_[part].choice.kind : std::string ("main");
+}
+
+std::string InstrumentService::partProblem (std::size_t part) const
+{
+    return part < parts_.size() ? parts_[part].problem : std::string();
 }
 
 std::vector<int> InstrumentService::partSoundIds() const

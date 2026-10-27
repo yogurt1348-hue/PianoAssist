@@ -140,6 +140,7 @@ ui::PianoRollView makePianoRollView (const timeline::Song& song, const std::stri
     view.notices.insert (view.notices.end(), song.warnings.begin(), song.warnings.end());
 
     const auto& ts = song.timeSignatures.front();
+    view.beatsPerBar = std::max (1, static_cast<int> (ts.numerator));
     const auto tr = [] (const char* text) { return juce::translate (text).toStdString(); };
     const auto reasonText = [&tr] (const std::string& reason) {
         // "non-piano instrument (program N)" carries a number; the rest are fixed phrases.
@@ -182,7 +183,9 @@ ui::PianoRollView makePianoRollView (const timeline::Song& song, const std::stri
                                 part.noteCount,
                                 part.trackName,
                                 part.track + 1,
-                                part.channel + 1 });
+                                part.channel + 1,
+                                part.program,
+                                part.channel == 9 });
     view.needsPartCheck = timeline::needsPartCheck (song);
     return view;
 }

@@ -6,6 +6,7 @@
 #include "ui/PianoRollComponent.h"
 #include "ui/PianoRollView.h"
 #include "ui/PracticeView.h"
+#include "ui/RollLegend.h"
 #include "ui/SoundView.h"
 #include "ui/TracksComponent.h"
 #include "ui/TransportView.h"
@@ -83,6 +84,16 @@ public:
         std::function<void()> showInstrumentWindow;
         std::function<void (bool light)> themeChanged;
         std::function<void (double scale)> uiScaleChanged;
+
+        // Piano roll view: never change what sounds or what is checked.
+        std::function<void (std::size_t part, bool visible)> partVisibleChanged;
+        std::function<void (int part)> selectPart;
+        std::function<void (std::size_t part)> showOnlyPart;
+        std::function<void()> showAllParts;
+        std::function<void()> clearSolos;
+        std::function<void (bool byTrack)> colourByTrackChanged;
+        std::function<void (bool hide)> hideDimmedChanged;
+        std::function<void (bool pianoOnly)> pianoOnlyChanged;
     };
 
     explicit MainComponent (Intents intents);
@@ -105,7 +116,9 @@ public:
     void setTempo (int percent);
     void setLoop (bool enabled, double startSeconds, double endSeconds);
     /** The tracks as the tracks window shows them; the side panel shows a summary. */
-    void setTracks (const std::vector<TrackRowView>& rows);
+    void setTracks (const std::vector<TrackRowView>& rows, int selected = -1);
+    /** Roll colours by hand or by track, faint tracks hidden, piano parts only. */
+    void setViewOptions (bool colourByTrack, bool hideDimmed, bool pianoOnly);
     /** Side panel width and state, and whether the roll follows the playhead. */
     void setLayoutChoices (int sidebarWidth, bool collapsed, bool follow);
     /** A short message that goes away by itself. */
@@ -152,6 +165,7 @@ private:
     void showTab (int index);
     void refreshStatus();
     void refreshColours();
+    void refreshRollStyles();
     void refreshSoundBoxes();
     void layoutSidebar (juce::Rectangle<int> area);
     void fillSoundBox (juce::ComboBox& box, bool withDefault, bool withActions) const;
@@ -169,6 +183,8 @@ private:
     PracticeView practice_;
     SoundView sound_;
     std::vector<TrackRowView> tracks_;
+    int selectedPart_ = -1;
+    bool colourByTrack_ = false, hideDimmed_ = false, pianoOnly_ = false;
     bool loopEnabled_ = false;
     double loopStart_ = 0.0, loopEnd_ = 0.0;
     void toggleLoop();
@@ -202,6 +218,7 @@ private:
     PianoRollComponent roll_;
     PianoRollComponent tracksRoll_;
     juce::Label tracksEmpty_;
+    RollLegend legend_;
     juce::TextButton emptyOpenButton_;
     juce::Label emptyHint_;
     juce::OwnedArray<juce::TextButton> recentButtons_;

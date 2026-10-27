@@ -13,6 +13,12 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
+
+namespace pianoassist::audio
+{
+class SoundFontRenderer;
+}
 
 namespace pianoassist::app
 {
@@ -60,6 +66,28 @@ public:
     /** A new song: its tracks' MIDI channels and saved sounds (may be empty). */
     void setSong (std::vector<int> channels, std::vector<TrackSound> sounds);
     void choosePart (std::size_t part, int soundId); ///< 0 = main sound
+    /** A preset instead of the file's instrument for this track: SoundFont
+        bank and program, or a VST3 program (bank ignored). Only this track
+        changes; its notes and the MIDI file stay as they are. */
+    void choosePartPreset (std::size_t part, int bank, int program);
+    /** Back to what the MIDI file selects, program changes included. */
+    void useMidiInstrument (std::size_t part);
+
+    struct Preset
+    {
+        int bank = -1;      ///< SoundFont bank; -1 for VST3 programs
+        int program = 0;
+        std::string name;
+        bool drums = false;
+    };
+    /** What the track's source offers: SoundFont presets, or the VST3's own
+        program list (empty when the plug-in chooses sounds in its window). */
+    std::vector<Preset> partPresets (std::size_t part) const;
+    /** The track's chosen preset, or nullopt when it follows the MIDI file. */
+    std::optional<Preset> partPreset (std::size_t part) const;
+    /** Source of every track, for the routing text: "main", "builtIn", "soundFont", "plugin". */
+    std::string partSourceName (std::size_t part) const;
+    std::string partProblem (std::size_t part) const;
     std::vector<int> partSoundIds() const;           ///< for the tracks list, 0 = main
     std::vector<bool> partHasEditor() const;         ///< tracks with their own plug-in window
     /** Current choices and plug-in states, for the song library. */
@@ -86,7 +114,10 @@ private:
     int soundIdOf (const settings::SoundSettings& choice) const;
     settings::SoundSettings choiceFor (int soundId) const;
     /** Makes the slot play its choice; returns false and sets problem on failure. */
-    bool realise (Slot& slot, const juce::MemoryBlock* state, bool drums);
+    bool realise (Slot& slot, const juce::MemoryBlock* state, bool drums, bool ownInstance = false);
+    /** Makes the track play choice: the new instance is ready before the old one goes. */
+    void replacePart (std::size_t part, settings::SoundSettings choice, const juce::MemoryBlock* state);
+    audio::SoundFontRenderer* sharedSoundFont (const std::string& path) const;
     void release (Slot& slot);
     int soundFontHandle (const std::filesystem::path& path, std::string& error);
     void releaseUnusedSoundFonts();

@@ -95,6 +95,40 @@ def tiny_soundfont() -> bytes:
     return b"RIFF" + struct.pack("<I", len(body)) + body
 
 
+def tiny_bank_soundfont() -> bytes:
+    """The tiny sine three times, told apart by loudness: "Sine" (bank 0,
+    program 0, full level), "Very Quiet Bass Tone" (bank 0, program 33, attenuated most;
+    a full 20-character name) and
+    "Tiny Kit" (bank 128, program 0, attenuated a little), for per-track preset tests."""
+    whole = tiny_soundfont()
+    # Reuse the sample data and instrument; replace the preset chunks.
+    def name20(text):
+        return text.encode("ascii")[:20].ljust(20, b"\0")
+    phdr = (name20("Sine") + struct.pack("<HHHIII", 0, 0, 0, 0, 0, 0)
+            + name20("Very Quiet Bass Tone") + struct.pack("<HHHIII", 33, 0, 1, 0, 0, 0)
+            + name20("Tiny Kit") + struct.pack("<HHHIII", 0, 128, 2, 0, 0, 0)
+            + name20("EOP") + struct.pack("<HHHIII", 0, 0, 3, 0, 0, 0))
+    pbag = struct.pack("<HHHHHHHH", 0, 0, 1, 0, 3, 0, 5, 0)
+    pgen = (struct.pack("<HH", 41, 0)
+            + struct.pack("<HH", 48, 1000) + struct.pack("<HH", 41, 0)
+            + struct.pack("<HH", 48, 300) + struct.pack("<HH", 41, 0)
+            + struct.pack("<HH", 0, 0))
+    start = whole.index(b"LIST", whole.index(b"sdta"))  # the pdta list
+    pdta = whole[start + 12:]
+    rest = {}
+    pos = 0
+    while pos < len(pdta):
+        cid = pdta[pos:pos + 4]
+        size = struct.unpack("<I", pdta[pos + 4:pos + 8])[0]
+        rest[cid] = pdta[pos + 8:pos + 8 + size]
+        pos += 8 + size + (size % 2)
+    new_pdta = riff_list(b"pdta", chunk(b"phdr", phdr), chunk(b"pbag", pbag), chunk(b"pmod", rest[b"pmod"]),
+                         chunk(b"pgen", pgen), chunk(b"inst", rest[b"inst"]), chunk(b"ibag", rest[b"ibag"]),
+                         chunk(b"imod", rest[b"imod"]), chunk(b"igen", rest[b"igen"]), chunk(b"shdr", rest[b"shdr"]))
+    body = whole[8:start] + new_pdta
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     scale = [60, 62, 64, 65, 67, 69, 71, 72]
@@ -196,6 +230,20 @@ def main():
 
     # 12. Tiny SoundFont for the .sf2 renderer tests (original, generated).
     (OUT / "tiny_sine.sf2").write_bytes(tiny_soundfont())
+    (OUT / "tiny_bank.sf2").write_bytes(tiny_bank_soundfont())
+
+    # 13. Two tracks on one MIDI channel with different programs; the second
+    #     selects bank 128 and changes program halfway (at 1 s, 120 BPM).
+    #     Track 2: "Bass" ch 1, bank 0 program 33, C2 at 0 s and 1 s.
+    #     Track 3: "Lead" ch 1, program 0, E4 at 0 s; bank 128 program 0 at 1 s, E4 again.
+    bass = track([(0, name("Bass")), (0, bytes([0xB0, 0, 0])), (0, bytes([0xB0, 32, 0])), (0, bytes([0xC0, 33])),
+                  (0, bytes([0x90, 36, 90])), (PPQ, bytes([0x80, 36, 0])),
+                  (PPQ, bytes([0x90, 36, 90])), (PPQ, bytes([0x80, 36, 0]))])
+    lead = track([(0, name("Lead")), (0, bytes([0xC0, 0])),
+                   (0, bytes([0x90, 64, 90])), (PPQ, bytes([0x80, 64, 0])),
+                   (PPQ, bytes([0xB0, 0, 1])), (0, bytes([0xB0, 32, 0])), (0, bytes([0xC0, 0])),
+                   (0, bytes([0x90, 64, 90])), (PPQ, bytes([0x80, 64, 0]))])
+    (OUT / "shared_channel_programs.mid").write_bytes(smf(1, [track([(0, tempo(500000))]), bass, lead]))
 
     print(f"Wrote fixtures to {OUT}")
 

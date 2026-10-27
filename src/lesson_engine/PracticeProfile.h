@@ -26,7 +26,7 @@ struct PracticeProfile
     keyboard/driver input latency. Audio output latency never moves it. */
 struct InputCalibration
 {
-    static constexpr double maxAbsOffsetMs = 500.0;
+    static constexpr double maxAbsOffsetMs = 600.0; // the latency test can measure wireless headphones
 
     double inputOffsetMs = 0.0;
 

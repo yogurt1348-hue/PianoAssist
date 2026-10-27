@@ -40,6 +40,7 @@ struct PracticeSnapshot
     std::vector<std::uint8_t> missing;      ///< current gate, not yet played
     std::vector<std::uint8_t> matched;      ///< current gate, already played
     std::vector<std::uint8_t> recentWrong;  ///< wrong presses in the last moment
+    double gateOnsetSeconds = -1.0;         ///< song time of the current gate, -1 when none
     std::size_t gateNumber = 0;             ///< 1-based current gate, 0 when none
     std::size_t gateCount = 0;
     std::string lastVerdict;

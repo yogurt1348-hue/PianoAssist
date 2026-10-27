@@ -86,6 +86,8 @@ public:
     Snapshot snapshot() const;
     std::string deviceDescription() const;
     Health takeHealth();
+    /** Highest output sample per channel since the last call, 0-1. */
+    std::pair<float, float> takePeaks();
     /** Wall time of the block that started the last previewed key: the
         reference for the latency test. */
     std::int64_t lastPreviewMicros() const noexcept { return lastPreviewMicros_.load (std::memory_order_acquire); }
@@ -179,6 +181,7 @@ private:
     std::array<std::atomic<std::uint32_t>, 16> channelNotes_ {};
     std::int64_t lastCallbackMicros_ = 0; // audio thread only
     std::atomic<std::int64_t> lastPreviewMicros_ { 0 };
+    std::atomic<float> peakLeft_ { 0.0f }, peakRight_ { 0.0f };
 };
 
 } // namespace pianoassist::app

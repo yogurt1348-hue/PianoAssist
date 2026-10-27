@@ -36,6 +36,10 @@ struct VisualPreferences
     bool sidebarCollapsed = false;
     std::string tracksWindow;       ///< "x y w h" of the tracks window, empty = centred
     std::string tracksColumns;      ///< column layout of the tracks window (JUCE header state)
+    bool colourByTrack = false;     ///< "My parts" notes in track colours instead of hand colours
+    bool hideDimmed = false;        ///< leave out tracks that are not heard instead of drawing them faint
+    bool pianoOnly = false;         ///< "All tracks" shows only the piano parts (view only)
+    bool tracksInspector = true;    ///< the mixer's details panel is shown
 
     friend bool operator== (const VisualPreferences&, const VisualPreferences&) = default;
 };
@@ -61,6 +65,12 @@ struct SoundSettings
     std::string pluginId;
     std::string pluginName;   ///< shown when the plug-in is missing
     std::string soundFontPath;
+    /** A preset chosen instead of the file's own instrument (track sounds):
+        SoundFont bank and program, or a VST3 program number in presetProgram.
+        -1 = play what the MIDI file selects, program changes included. */
+    int presetBank = -1;
+    int presetProgram = -1;
+    std::string presetName; ///< shown when the preset is missing
     std::vector<std::string> pluginFolders; ///< extra VST3 folders to scan (UTF-8), global only
 
     friend bool operator== (const SoundSettings&, const SoundSettings&) = default;

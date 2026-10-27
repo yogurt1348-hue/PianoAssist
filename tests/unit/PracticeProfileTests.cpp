@@ -46,8 +46,8 @@ TEST_CASE ("Practice profile validation rejects unusable windows")
 
 TEST_CASE ("Calibration offset is bounded")
 {
-    CHECK (lesson::validate (lesson::InputCalibration { 499.0 }).empty());
-    CHECK (lesson::validate (lesson::InputCalibration { -501.0 }).size() == 1);
+    CHECK (lesson::validate (lesson::InputCalibration { 599.0 }).empty());
+    CHECK (lesson::validate (lesson::InputCalibration { -601.0 }).size() == 1);
 }
 
 TEST_CASE ("Transport state names match the architecture")
