@@ -113,9 +113,11 @@ TracksComponent::TracksComponent (Intents intents) : intents_ (std::move (intent
     addAndMakeVisible (table_);
 
     detailTitle_.setFont (juce::FontOptions (16.0f, juce::Font::bold));
+    detailTitle_.setMinimumHorizontalScale (1.0f);
     for (auto* l : { &detailRole_, &detailSound_, &detailInfo_ })
     {
         l->setFont (juce::FontOptions (14.0f));
+        l->setMinimumHorizontalScale (1.0f); // wrap instead of squeezing the letters
         l->setJustificationType (juce::Justification::topLeft);
     }
     editorButton_.setButtonText (TRANS ("Open the track's instrument window"));
@@ -355,6 +357,8 @@ juce::Component* TracksComponent::refreshComponentForCell (int row, int column, 
                 toggle = new Cell<juce::ToggleButton>();
                 const bool mute = column == muteColumn;
                 toggle->setTitle (mute ? TRANS ("Mute") : TRANS ("Solo"));
+                // The box outline must stay visible on the highlighted (selected) row too.
+                toggle->setColour (juce::ToggleButton::tickDisabledColourId, theme::text.withAlpha (0.75f));
                 toggle->setTooltip (mute ? TRANS ("Silence this track. What you have to play does not change.")
                                          : TRANS ("Hear only the solo tracks (and your own playing). What you have to play does not change."));
                 toggle->onClick = [this, toggle, mute] {

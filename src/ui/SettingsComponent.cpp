@@ -191,8 +191,8 @@ public:
         window_.setButtonText (TRANS ("Instrument window..."));
         window_.onClick = [this] { if (intents_.showInstrumentWindow) intents_.showInstrumentWindow(); };
         addAndMakeVisible (window_);
-        addNote (mainNote_, TRANS ("Plays every track that has no sound of its own. Choose a sound per track in the side "
-                                   "panel (Tracks and instruments). Tracks left on the main sound reach it on their own MIDI "
+        addNote (mainNote_, TRANS ("Plays every track that has no sound of its own. Choose a sound per track in the Tracks "
+                                   "and instruments window. Tracks left on the main sound reach it on their own MIDI "
                                    "channel, so a multitimbral instrument can be set up per channel in its window."));
 
         addHeading (vstHeading_, TRANS ("VST3 instruments"));
@@ -372,7 +372,7 @@ public:
         toleranceNote_.setBounds (r.take (78, 12));
         waitHeading_.setBounds (r.take (26, 4));
         wait_.setBounds (r.take (26, 2));
-        waitNote_.setBounds (r.take (22, 12));
+        waitNote_.setBounds (r.take (36, 12));
         handsHeading_.setBounds (r.take (26, 4));
         handsNote_.setBounds (r.take (54, 12));
         libraryHeading_.setBounds (r.take (26, 4));
