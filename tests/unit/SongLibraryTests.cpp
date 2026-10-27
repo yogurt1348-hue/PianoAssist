@@ -123,6 +123,10 @@ TEST_CASE ("The library lists recent songs first, flags a missing copy and remov
     // Removing never reaches outside the library, and keeps the original.
     CHECK_FALSE (removeSong (root, dir / "in").isOk());
     CHECK (fs::exists (a));
+    fs::create_directories (root / "not a song");
+    CHECK_FALSE (removeSong (root, root / "not a song").isOk()); // no manifest: left alone
+    CHECK (fs::exists (root / "not a song"));
+    CHECK_FALSE (removeSong (root, root).isOk());
     REQUIRE (removeSong (root, first.folder).isOk());
     CHECK_FALSE (fs::exists (first.folder));
     CHECK (fs::exists (a));
