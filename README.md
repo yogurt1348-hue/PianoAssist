@@ -6,7 +6,17 @@ The product brief and phase plan live in [`docs/plan/`](docs/plan/README.md). Im
 
 ## Status
 
-Phase 0 (foundation) is done. Phase 1 (USB MIDI input) is in progress: the app lists MIDI inputs, opens the piano automatically, shows a live monitor of notes and the sustain pedal, and recovers when the cable is unplugged and plugged back. Manual check: [`docs/manual-checks/phase-1-midi-input.md`](docs/manual-checks/phase-1-midi-input.md). Phase 2 (song loading and playback) is in progress: MIDI files (format 0/1) open from a button, drag and drop or the command line, are drawn on a scrollable, zoomable piano roll with inferred hand roles, and play through a built-in synth with Play/Pause (Space), Stop, Silence (Esc), volume and click-to-seek. Note-gated practice arrives in phase 3.
+Version 0.2.0, test builds. Implemented and covered by automated tests: USB MIDI input with reconnect, MIDI playback with built-in synth, SoundFont and VST3 sounds per track, note-gated practice with hand modes, A–B practice ranges with loop and count-in, tempo 25–200%, a song library that keeps a copy and the settings of each song, settings window, Russian and English UI, installer and portable builds, update check.
+
+Hardware behaviour on the Casio is checked by hand: [`docs/manual-checks/casio-checklist.md`](docs/manual-checks/casio-checklist.md).
+
+| Document | What it covers |
+| --- | --- |
+| [`docs/practice-rules.md`](docs/practice-rules.md) | How notes, chords, loops, seeks and count-in behave |
+| [`docs/data-and-updates.md`](docs/data-and-updates.md) | Where data is kept, the song library, updating, versions |
+| [`docs/windows-warnings.md`](docs/windows-warnings.md) | SmartScreen and Defender, checking SHA-256, signing |
+| [`docs/sounds.md`](docs/sounds.md) | Sounds, free SoundFonts and VST3 instruments |
+| [`docs/known-limitations.md`](docs/known-limitations.md) | Known limitations |
 
 ## Requirements
 
@@ -45,8 +55,9 @@ No MIDI keyboard or audio device is needed for the automated tests.
 
 | File | Location on Windows |
 | --- | --- |
-| Settings | `%APPDATA%\PianoAssist\settings.json` |
+| Settings | `%APPDATA%\PianoAssist\settings.json` (portable: `Data\settings.json` next to the exe) |
 | Logs | `%APPDATA%\PianoAssist\logs\pianoassist.log` (JSON lines, rotated at 5 MiB, 5 archives kept) |
+| Song library | `%APPDATA%\PianoAssist\Songs` (or the folder chosen in Settings) |
 
 Logs record every startup step, the app and Windows versions, MIDI devices appearing and disappearing, every note and pedal event, user actions, errors and crashes with a stack trace. They do not record the paths or contents of your music files. "Open log folder" in the app opens this folder.
 

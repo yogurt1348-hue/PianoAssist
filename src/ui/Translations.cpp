@@ -280,6 +280,14 @@ constexpr Pair pairs[] = {
     { "Count-in", "Отсчёт" },
     { "Count-in before playing (one bar)", "Отсчёт перед игрой (один такт)" },
 
+    // Song summary and audio
+    { "Format", "Формат" },
+    { "tracks", "дорожек" },
+    { "notes", "нот" },
+    { "note", "нота" },
+    { "tempo changes", "темп меняется" },
+    { "No audio output device found.", "Устройство вывода звука не найдено." },
+
     // Song library
     { "Song library...", "Библиотека композиций..." },
     { "Song library", "Библиотека композиций" },

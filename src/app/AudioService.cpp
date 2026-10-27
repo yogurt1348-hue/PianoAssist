@@ -71,7 +71,7 @@ std::string AudioService::start (const std::string& savedStateXml)
     if (deviceManager_.getCurrentAudioDevice() == nullptr)
     {
         log_.write (LogLevel::error, "audio", "No audio output device found");
-        return "no audio output device found";
+        return juce::translate ("No audio output device found.").toStdString();
     }
     deviceManager_.addChangeListener (this);
     deviceManager_.addAudioCallback (this);

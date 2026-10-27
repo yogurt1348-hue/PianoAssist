@@ -6,6 +6,8 @@
 #include "smf/SmfReader.h"
 #include "timeline/GmInstruments.h"
 
+#include <juce_core/juce_core.h>
+
 #include <chrono>
 #include <cmath>
 
@@ -136,11 +138,12 @@ ui::PianoRollView makePianoRollView (const timeline::Song& song, const std::stri
     view.notices.insert (view.notices.end(), song.warnings.begin(), song.warnings.end());
 
     const auto& ts = song.timeSignatures.front();
-    view.summary = "Format " + std::to_string (song.format) + " · " + std::to_string (song.trackNames.size())
-                   + " tracks · " + std::to_string (song.timeline.notes().size()) + " notes · "
+    const auto tr = [] (const char* text) { return juce::translate (text).toStdString(); };
+    view.summary = tr ("Format") + " " + std::to_string (song.format) + " · " + std::to_string (song.trackNames.size())
+                   + " " + tr ("tracks") + " · " + std::to_string (song.timeline.notes().size()) + " " + tr ("notes") + " · "
                    + formatTime (song.durationSeconds) + " · "
                    + std::to_string (static_cast<int> (std::lround (song.tempoMap.tempoBpmAt (0)))) + " BPM"
-                   + (song.tempoMap.changes().size() > 1 ? " (tempo changes)" : "") + " · "
+                   + (song.tempoMap.changes().size() > 1 ? " (" + tr ("tempo changes") + ")" : std::string()) + " · "
                    + std::to_string (ts.numerator) + "/" + std::to_string (ts.denominator);
 
     view.lowestPitch = 127;
@@ -160,7 +163,7 @@ ui::PianoRollView makePianoRollView (const timeline::Song& song, const std::stri
 
     for (const auto& part : song.parts)
         view.parts.push_back ({ partLabel (part),
-                                std::to_string (part.noteCount) + (part.noteCount == 1 ? " note · " : " notes · ") + noteName (part.lowestPitch) + "-"
+                                std::to_string (part.noteCount) + " " + tr (part.noteCount == 1 ? "note" : "notes") + " · " + noteName (part.lowestPitch) + "-"
                                     + noteName (part.highestPitch) + " · " + part.reason,
                                 partRollRole (part.assignment),
                                 roleText (part.assignment),
