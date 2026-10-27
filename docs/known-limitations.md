@@ -12,5 +12,8 @@ Each item has a severity and a workaround. Severity: **high** blocks practice, *
 | 6 | The installer and exe are not code-signed, so SmartScreen may warn on first run. | low | "More info" -> "Run anyway". Signing is prepared in `installer/PianoAssist.iss` without credentials. |
 | 7 | One MIDI input device at a time; no MIDI output to the piano's own sounds. | low | Use the app's sound through speakers or headphones. |
 | 8 | Tempo cannot be slowed down yet. | medium | Strict waiting at each note gives a self-paced tempo. |
+| 9 | Tracks muted on the "Other tracks" tab are not remembered between sessions or songs. | low | Untick them again after opening the song. |
+| 10 | No sounds are bundled (licences). The built-in synth is the default. | medium | Load a free SoundFont or VST3 from `docs/sounds.md`. |
+| 11 | VST3 only: no VST2, AU or CLAP plug-ins. A plug-in that crashes during a scan is skipped next time, but one that crashes while playing closes the app. | medium | Remove the plug-in from the list by choosing another sound; report it with the log. |
 
 Diagnostics stay on the computer: the log folder, "Diagnostics... -> Copy" and "Save" are the only outputs, and the user's folder name is replaced in reports. There is no telemetry or network access.
