@@ -72,7 +72,9 @@ void PluginInstrumentRenderer::render (std::span<const ScheduledMidiEvent> event
     for (const auto& e : events)
     {
         const int kind = e.status & 0xF0;
-        if ((e.status & 0x0F) == drumChannel && (kind == 0x80 || kind == 0x90))
+        if (! sendDrums_ && (e.status & 0x0F) == drumChannel && (kind == 0x80 || kind == 0x90))
+            continue;
+        if (kind == 0xC0)
             continue;
         const int offset = std::clamp (e.sampleOffset, 0, std::max (0, block.numFrames - 1));
         const std::uint8_t bytes[3] { e.status, e.data1, e.data2 };

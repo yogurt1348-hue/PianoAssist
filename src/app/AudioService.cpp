@@ -7,7 +7,44 @@ namespace
 using diagnostics::LogLevel;
 }
 
-AudioService::AudioService (diagnostics::RotatingLog& log) : log_ (log) {}
+/** What the playback engine renders through: the current routing. */
+class AudioService::RoutedRenderer final : public audio::IInstrumentRenderer
+{
+public:
+    explicit RoutedRenderer (AudioService& owner) : owner_ (owner) {}
+    void prepare (double, int) override {}
+    void render (std::span<const audio::ScheduledMidiEvent> events, audio::RenderBlock block) noexcept override
+    {
+        owner_.router_.render (*owner_.lastRouting_, events, block);
+    }
+    void allNotesOff() noexcept override { forEach ([] (auto& r) { r.allNotesOff(); }); }
+    void silence() noexcept override { forEach ([] (auto& r) { r.silence(); }); }
+    int reportedLatencyFrames() const noexcept override { return owner_.lastRouting_->main->reportedLatencyFrames(); }
+    int activeVoiceCount() const noexcept override { return audio::InstrumentRouter::activeVoices (*owner_.lastRouting_); }
+
+private:
+    template <typename F>
+    void forEach (F&& f) noexcept
+    {
+        const auto& routing = *owner_.lastRouting_;
+        f (*routing.main);
+        for (auto* r : routing.channels)
+            if (r != nullptr && r != routing.main)
+                f (*r); // a renderer on several channels is called more than once: harmless
+    }
+
+    AudioService& owner_;
+};
+
+AudioService::AudioService (diagnostics::RotatingLog& log)
+    : log_ (log),
+      routing_ (std::make_unique<audio::InstrumentRouting>()),
+      routed_ (std::make_unique<RoutedRenderer> (*this))
+{
+    routing_->main = &synth_;
+    activeRouting_.store (routing_.get());
+    lastRouting_ = routing_.get();
+}
 
 AudioService::~AudioService()
 {
@@ -16,10 +53,16 @@ AudioService::~AudioService()
     deviceManager_.closeAudioDevice();
 }
 
-std::string AudioService::start()
+std::string AudioService::start (const std::string& savedStateXml)
 {
-    log_.write (LogLevel::info, "audio", "Opening default audio output");
-    const auto error = deviceManager_.initialiseWithDefaultDevices (0, 2);
+    log_.write (LogLevel::info, "audio", savedStateXml.empty() ? "Opening default audio output" : "Opening saved audio output");
+    auto saved = savedStateXml.empty() ? nullptr : juce::parseXML (juce::String::fromUTF8 (savedStateXml.c_str()));
+    auto error = deviceManager_.initialise (0, 2, saved.get(), true);
+    if (error.isNotEmpty() && saved != nullptr)
+    {
+        log_.write (LogLevel::warning, "audio", "Saved audio output unavailable; using the default", { { "error", error.toStdString() } });
+        error = deviceManager_.initialiseWithDefaultDevices (0, 2);
+    }
     if (error.isNotEmpty())
     {
         log_.write (LogLevel::error, "audio", "Could not open audio output", { { "error", error.toStdString() } });
@@ -33,6 +76,13 @@ std::string AudioService::start()
     deviceManager_.addChangeListener (this);
     deviceManager_.addAudioCallback (this);
     log_.write (LogLevel::info, "audio", "Audio output ready", { { "device", deviceDescription() } });
+    return {};
+}
+
+std::string AudioService::deviceStateXml() const
+{
+    if (auto xml = deviceManager_.createStateXml())
+        return xml->toString (juce::XmlElement::TextFormat().singleLine().withoutHeader()).toStdString();
     return {};
 }
 
@@ -127,18 +177,59 @@ std::pair<double, int> AudioService::renderFormat() const
     return { deviceRate_.load(), deviceBlock_.load() };
 }
 
-void AudioService::setInstrument (std::unique_ptr<audio::IInstrumentRenderer> instrument)
+int AudioService::addInstrument (std::unique_ptr<audio::IInstrumentRenderer> instrument)
 {
+    if (! instrument)
+        return builtInHandle;
     const auto [rate, block] = renderFormat();
-    if (instrument)
-        instrument->prepare (rate, block);
-    auto* next = instrument ? instrument.get() : static_cast<audio::IInstrumentRenderer*> (&synth_);
-    active_.store (next, std::memory_order_release);
-    if (external_)
-        retiredInstruments_.emplace_back (std::move (external_), blocksRendered_.load());
-    external_ = std::move (instrument);
-    log_.write (LogLevel::info, "audio", "Instrument switched",
-                { { "latencyFrames", std::to_string (next->reportedLatencyFrames()) },
+    instrument->prepare (rate, block);
+    std::scoped_lock lock (instrumentsMutex_);
+    const int handle = nextHandle_++;
+    owned_.emplace (handle, std::move (instrument));
+    return handle;
+}
+
+void AudioService::removeInstrument (int handle)
+{
+    std::scoped_lock lock (instrumentsMutex_);
+    if (const auto it = owned_.find (handle); it != owned_.end())
+    {
+        jassert (! routing_->uses (it->second.get()));
+        retiredInstruments_.emplace_back (std::move (it->second), blocksRendered_.load());
+        owned_.erase (it);
+    }
+}
+
+audio::IInstrumentRenderer* AudioService::instrument (int handle) const
+{
+    if (handle == builtInHandle)
+        return const_cast<audio::InternalSynthRenderer*> (&synth_);
+    std::scoped_lock lock (instrumentsMutex_);
+    const auto it = owned_.find (handle);
+    return it != owned_.end() ? it->second.get() : nullptr;
+}
+
+void AudioService::setRouting (int mainHandle, const std::array<int, 16>& channelHandles)
+{
+    auto next = std::make_unique<audio::InstrumentRouting>();
+    next->main = instrument (mainHandle);
+    if (next->main == nullptr)
+        next->main = &synth_;
+    std::string routed;
+    for (std::size_t ch = 0; ch < 16; ++ch)
+        if (channelHandles[ch] >= 0)
+            if (auto* r = instrument (channelHandles[ch]); r != nullptr && r != next->main)
+            {
+                next->channels[ch] = r;
+                routed += (routed.empty() ? "" : " ") + std::to_string (ch + 1);
+            }
+    activeRouting_.store (next.get(), std::memory_order_release);
+    retiredRoutings_.emplace_back (std::move (routing_), blocksRendered_.load());
+    routing_ = std::move (next);
+    const auto [rate, block] = renderFormat();
+    log_.write (LogLevel::info, "audio", "Instruments routed",
+                { { "main", std::to_string (mainHandle) }, { "ownChannels", routed.empty() ? "(none)" : routed },
+                  { "latencyFrames", std::to_string (routing_->main->reportedLatencyFrames()) },
                   { "rate", std::to_string (static_cast<int> (rate)) }, { "block", std::to_string (block) } });
 }
 
@@ -149,6 +240,10 @@ void AudioService::collectGarbage()
         // gets its silence() call in N + 1; after that nobody touches it.
         const auto blocks = blocksRendered_.load();
         const bool deviceRunning = deviceOpen_.load();
+        std::erase_if (retiredRoutings_, [blocks, deviceRunning] (const auto& entry) {
+            return ! deviceRunning || blocks >= entry.second + 2;
+        });
+        std::scoped_lock lock (instrumentsMutex_);
         std::erase_if (retiredInstruments_, [blocks, deviceRunning] (const auto& entry) {
             return ! deviceRunning || blocks >= entry.second + 2;
         });
@@ -170,9 +265,12 @@ void AudioService::audioDeviceAboutToStart (juce::AudioIODevice* device)
     deviceRate_.store (rate);
     deviceBlock_.store (block);
     synth_.prepare (rate, block);
-    if (external_)
-        external_->prepare (rate, block);
-    lastUsed_ = active_.load(); // the previous one may already be deleted
+    {
+        std::scoped_lock lock (instrumentsMutex_);
+        for (auto& [handle, instrument] : owned_)
+            instrument->prepare (rate, block);
+    }
+    lastRouting_ = activeRouting_.load(); // the previous one may already be deleted
     engine_.prepare (rate);
     gain_.reset (rate, 0.02);
     gain_.setCurrentAndTargetValue (targetGain_.load());
@@ -199,15 +297,16 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
 {
     // Audio thread: no allocation, locks, logging or file access.
     const auto blockStart = nowMicros();
-    auto* instrument = active_.load (std::memory_order_acquire);
-    if (instrument != lastUsed_)
+    const auto* routing = activeRouting_.load (std::memory_order_acquire);
+    if (routing != lastRouting_)
     {
-        // New instrument: the old one falls silent, the new one learns the
-        // channel programs. Notes the old one was playing are dropped.
-        lastUsed_->silence();
-        lastUsed_ = instrument;
+        // New routing: instruments no longer used fall silent, the others
+        // learn the channel programs. Notes they were playing are dropped.
+        audio::InstrumentRouter::silenceDropped (*lastRouting_, *routing);
+        lastRouting_ = routing;
         engine_.queuePrograms();
     }
+    auto* instrument = routed_.get();
     while (const auto command = commands_.pop())
         engine_.handle (*command, *instrument);
 

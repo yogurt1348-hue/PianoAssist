@@ -22,6 +22,7 @@ public:
     void setPartVisible (std::size_t part, bool visible);
     void setHeldInputPitches (std::vector<std::uint8_t> pitches);
     void setPixelsPerSecond (double pixelsPerSecond);
+    double pixelsPerSecond() const noexcept { return pixelsPerSecond_; }
     /** Moves the playhead; when following, pages the view to keep it visible. */
     void setPlayhead (double seconds, bool follow);
 
@@ -36,6 +37,7 @@ public:
 private:
     static constexpr int gutterWidth = 44;
     static constexpr int scrollBarHeight = 12;
+    static constexpr int rulerHeight = 22;
 
     void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
     void updateScrollBar();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "audio/InstrumentRouter.h"
 #include "audio/InternalSynthRenderer.h"
 #include "audio/PlaybackEngine.h"
 #include "core/SpscQueue.h"
@@ -8,7 +9,9 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
+#include <array>
 #include <atomic>
+#include <map>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -41,8 +44,12 @@ public:
     explicit AudioService (diagnostics::RotatingLog& log);
     ~AudioService() override;
 
-    /** Opens the default output device; returns an empty string or the error. */
-    std::string start();
+    /** Opens the saved output device (JUCE device state XML), or the default
+        one; returns an empty string or the error. */
+    std::string start (const std::string& savedStateXml = {});
+    /** For the settings page: choose the output device and buffer size. */
+    juce::AudioDeviceManager& deviceManager() noexcept { return deviceManager_; }
+    std::string deviceStateXml() const;
 
     /** Plays only notes whose role passes the filter (practised hands are
         played by the learner). Stops playback and returns to 0. */
@@ -65,12 +72,17 @@ public:
         Call from a timer on the message thread. */
     void collectGarbage();
 
-    /** Message thread. Prepares the instrument for the current device and
-        hands it to the audio thread; nullptr returns to the built-in synth.
-        The previous instrument is destroyed later, on the message thread,
-        once the audio thread can no longer be using it. */
-    void setInstrument (std::unique_ptr<audio::IInstrumentRenderer> instrument);
-    audio::IInstrumentRenderer* instrument() const noexcept { return external_.get(); }
+    /** Instruments are owned here and named by handles; 0 is the built-in
+        synth. addInstrument prepares it for the current device. Message thread. */
+    static constexpr int builtInHandle = 0;
+    int addInstrument (std::unique_ptr<audio::IInstrumentRenderer> instrument);
+    /** Deleted later, once the audio thread can no longer be using it. Drop it
+        from the routing first. */
+    void removeInstrument (int handle);
+    audio::IInstrumentRenderer* instrument (int handle) const;
+    /** Main instrument plus, per MIDI channel, an instrument handle or -1 for
+        "the main one". Unknown handles fall back to the main instrument. */
+    void setRouting (int mainHandle, const std::array<int, 16>& channelHandles);
 
     /** Sample rate and block size the instrument must be prepared for. */
     std::pair<double, int> renderFormat() const;
@@ -99,10 +111,17 @@ private:
 
     // Instruments: the audio thread reads active_ once per block. Retired
     // instruments wait for two more blocks before the message thread deletes them.
-    std::unique_ptr<audio::IInstrumentRenderer> external_;
+    class RoutedRenderer;
+    mutable std::mutex instrumentsMutex_; // owned_ is read by the device-start callback
+    std::map<int, std::unique_ptr<audio::IInstrumentRenderer>> owned_;
+    int nextHandle_ = 1;
     std::vector<std::pair<std::unique_ptr<audio::IInstrumentRenderer>, std::uint64_t>> retiredInstruments_;
-    std::atomic<audio::IInstrumentRenderer*> active_ { &synth_ };
-    audio::IInstrumentRenderer* lastUsed_ = &synth_; // audio thread only
+    std::unique_ptr<audio::InstrumentRouting> routing_;
+    std::vector<std::pair<std::unique_ptr<audio::InstrumentRouting>, std::uint64_t>> retiredRoutings_;
+    std::atomic<const audio::InstrumentRouting*> activeRouting_ { nullptr };
+    const audio::InstrumentRouting* lastRouting_ = nullptr; // audio thread only
+    audio::InstrumentRouter router_;
+    std::unique_ptr<RoutedRenderer> routed_;
     std::atomic<std::uint64_t> blocksRendered_ { 0 };
     std::atomic<double> deviceRate_ { 48000.0 };
     std::atomic<int> deviceBlock_ { 512 };

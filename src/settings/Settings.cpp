@@ -22,25 +22,6 @@ const std::map<int, std::function<void (json&)>>& migrations()
     return steps;
 }
 
-std::string modeKey (lesson::PracticeMode mode)
-{
-    switch (mode)
-    {
-        case lesson::PracticeMode::bothHands: return "bothHands";
-        case lesson::PracticeMode::rightHand: return "rightHand";
-        case lesson::PracticeMode::leftHand:  return "leftHand";
-    }
-    return "bothHands";
-}
-
-std::optional<lesson::PracticeMode> modeFromKey (const std::string& key)
-{
-    for (const auto mode : { lesson::PracticeMode::bothHands, lesson::PracticeMode::rightHand, lesson::PracticeMode::leftHand })
-        if (key == modeKey (mode))
-            return mode;
-    return std::nullopt;
-}
-
 class Reader
 {
 public:
@@ -108,6 +89,25 @@ LoadResult defaultsWith (std::string warning, int storedVersion = 0)
 }
 } // namespace
 
+std::string modeKey (lesson::PracticeMode mode)
+{
+    switch (mode)
+    {
+        case lesson::PracticeMode::bothHands: return "bothHands";
+        case lesson::PracticeMode::rightHand: return "rightHand";
+        case lesson::PracticeMode::leftHand:  return "leftHand";
+    }
+    return "bothHands";
+}
+
+std::optional<lesson::PracticeMode> modeFromKey (const std::string& key)
+{
+    for (const auto mode : { lesson::PracticeMode::bothHands, lesson::PracticeMode::rightHand, lesson::PracticeMode::leftHand })
+        if (key == modeKey (mode))
+            return mode;
+    return std::nullopt;
+}
+
 std::string toJson (const Settings& s)
 {
     const json root {
@@ -125,7 +125,8 @@ std::string toJson (const Settings& s)
           { { "kind", s.sound.kind },
             { "pluginId", s.sound.pluginId },
             { "pluginName", s.sound.pluginName },
-            { "soundFontPath", s.sound.soundFontPath } } },
+            { "soundFontPath", s.sound.soundFontPath },
+            { "pluginFolders", s.sound.pluginFolders } } },
         { "practice",
           { { "mode", modeKey (s.practice.mode) },
             { "playOtherPianoPart", s.practice.accompaniment.playOtherPianoPart },
@@ -230,6 +231,12 @@ LoadResult fromJson (std::string_view text)
     reader.read ("sound", "pluginId", s.sound.pluginId, bounded);
     reader.read ("sound", "pluginName", s.sound.pluginName, bounded);
     reader.read ("sound", "soundFontPath", s.sound.soundFontPath, bounded);
+    if (const auto sound = root.find ("sound"); sound != root.end() && sound->is_object())
+        if (const auto folders = sound->find ("pluginFolders"); folders != sound->end() && folders->is_array())
+            for (const auto& folder : *folders)
+                if (folder.is_string() && ! folder.get<std::string>().empty() && folder.get<std::string>().size() <= 4096
+                    && s.sound.pluginFolders.size() < 32)
+                    s.sound.pluginFolders.push_back (folder.get<std::string>());
 
     result.status = result.warnings.empty() ? LoadStatus::loaded : LoadStatus::recovered;
     return result;

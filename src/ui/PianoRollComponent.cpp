@@ -70,7 +70,7 @@ void PianoRollComponent::setPixelsPerSecond (double pixelsPerSecond)
 
 juce::Rectangle<int> PianoRollComponent::rollArea() const
 {
-    return getLocalBounds().withTrimmedLeft (gutterWidth).withTrimmedBottom (scrollBarHeight);
+    return getLocalBounds().withTrimmedLeft (gutterWidth).withTrimmedBottom (scrollBarHeight).withTrimmedTop (rulerHeight);
 }
 
 float PianoRollComponent::rowHeight() const
@@ -92,7 +92,7 @@ float PianoRollComponent::xForSeconds (double seconds) const
 void PianoRollComponent::paint (juce::Graphics& g)
 {
     const auto area = rollArea();
-    g.setColour (juce::Colour (0xff1e2428));
+    g.setColour (theme::rollBackground);
     g.fillRect (area);
 
     const float row = rowHeight();
@@ -101,12 +101,12 @@ void PianoRollComponent::paint (juce::Graphics& g)
         const float y = yForPitch (pitch);
         if (isBlackKey (pitch))
         {
-            g.setColour (juce::Colour (0xff181d20));
+            g.setColour (theme::rollBlackRow);
             g.fillRect (juce::Rectangle<float> (static_cast<float> (area.getX()), y, static_cast<float> (area.getWidth()), row));
         }
         if (pitch % 12 == 0)
         {
-            g.setColour (juce::Colour (0xff3a444a));
+            g.setColour (theme::rollOctaveLine);
             g.drawHorizontalLine (static_cast<int> (y + row), static_cast<float> (area.getX()), static_cast<float> (area.getRight()));
         }
     }
@@ -116,7 +116,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
     {
         const auto key = juce::Rectangle<float> (0.0f, yForPitch (pitch), static_cast<float> (gutterWidth - 2), row);
         const bool held = std::find (heldInput_.begin(), heldInput_.end(), pitch) != heldInput_.end();
-        g.setColour (held ? juce::Colour (0xff6fcf97) : (isBlackKey (pitch) ? juce::Colour (0xff222222) : juce::Colour (0xffdcdcdc)));
+        g.setColour (held ? theme::good : (isBlackKey (pitch) ? juce::Colour (0xff222222) : juce::Colour (0xffdcdcdc)));
         g.fillRect (key.reduced (0.0f, 0.5f));
         if (pitch % 12 == 0 && row >= 7.0f)
         {
@@ -133,10 +133,40 @@ void PianoRollComponent::paint (juce::Graphics& g)
     g.reduceClipRegion (area);
 
     const double visibleEnd = viewStartSeconds_ + area.getWidth() / pixelsPerSecond_;
-    g.setColour (juce::Colour (0xff4d5a62));
+    g.setColour (theme::rollBarLine);
     for (const double bar : view_->barStarts)
         if (bar >= viewStartSeconds_ && bar <= visibleEnd)
             g.drawVerticalLine (static_cast<int> (xForSeconds (bar)), static_cast<float> (area.getY()), static_cast<float> (area.getBottom()));
+    g.restoreState();
+
+    // Bar numbers above the roll; thinned out when bars are narrow.
+    {
+        const auto ruler = juce::Rectangle<int> (area.getX(), 0, area.getWidth(), rulerHeight);
+        g.saveState();
+        g.reduceClipRegion (ruler);
+        g.setFont (juce::FontOptions (12.0f));
+        g.setColour (theme::mutedText);
+        int every = 1;
+        if (view_->barStarts.size() > 1)
+        {
+            const double barPixels = (view_->barStarts[1] - view_->barStarts[0]) * pixelsPerSecond_;
+            while (barPixels * every < 36.0 && every < 64)
+                every *= 2;
+        }
+        for (std::size_t i = 0; i < view_->barStarts.size(); ++i)
+        {
+            const double bar = view_->barStarts[i];
+            if (bar > visibleEnd)
+                break;
+            if (bar < viewStartSeconds_ - 2.0 || (i % static_cast<std::size_t> (every)) != 0)
+                continue;
+            const auto x = static_cast<int> (xForSeconds (bar));
+            g.drawText (juce::String (static_cast<int> (i + 1)), x + 3, 2, 40, rulerHeight - 4, juce::Justification::centredLeft);
+        }
+        g.restoreState();
+    }
+    g.saveState();
+    g.reduceClipRegion (area);
 
     for (const auto& note : view_->notes)
     {
@@ -157,7 +187,7 @@ void PianoRollComponent::paint (juce::Graphics& g)
         g.fillRoundedRectangle (rect, std::min (3.0f, row / 3.0f));
     }
     const float playheadX = xForSeconds (playheadSeconds_);
-    g.setColour (juce::Colour (0xffff5c5c));
+    g.setColour (theme::playhead);
     g.fillRect (juce::Rectangle<float> (playheadX - 1.0f, static_cast<float> (area.getY()), 2.0f, static_cast<float> (area.getHeight())));
     g.restoreState();
 }
@@ -181,7 +211,8 @@ void PianoRollComponent::setPlayhead (double seconds, bool follow)
 
 void PianoRollComponent::mouseDown (const juce::MouseEvent& e)
 {
-    if (view_ == nullptr || ! rollArea().contains (e.getPosition()) || ! onSeekRequested)
+    const auto clickable = rollArea().withTop (0);
+    if (view_ == nullptr || ! clickable.contains (e.getPosition()) || ! onSeekRequested)
         return;
     const double seconds = viewStartSeconds_ + (static_cast<double> (e.position.x) - rollArea().getX()) / pixelsPerSecond_;
     onSeekRequested (std::clamp (seconds, 0.0, view_->durationSeconds));

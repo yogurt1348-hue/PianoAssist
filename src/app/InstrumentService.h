@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/AudioService.h"
+#include "app/PluginScanner.h"
 #include "diagnostics/RotatingLog.h"
 #include "settings/Settings.h"
 #include "ui/SoundView.h"
@@ -10,46 +11,86 @@
 
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 
 namespace pianoassist::app
 {
 
-/** Chooses what the song sounds like: the built-in synth, a SoundFont (.sf2)
-    or a VST3 instrument. Finds VST3 instruments in the standard folders,
-    remembers the choice and the plug-in's own settings, and shows the
-    plug-in's window. Message thread only.
+/** Chooses what the song sounds like. The main sound plays every channel
+    unless a track has its own: the built-in sound, a SoundFont (.sf2), or a
+    VST3 instrument. Each track with its own VST3 gets a separate instance;
+    tracks left on the main sound reach it on their own MIDI channel, so a
+    multitimbral instrument can be set up per channel in its window.
 
-    Scanning loads each plug-in inside this process. A file that crashes the
-    scan is remembered (dead man's pedal) and skipped next time. */
-class InstrumentService final : private juce::Timer
+    VST3 files are scanned in a helper process (see PluginScanner), from the
+    standard folders and the user's own. Remembers the main choice globally
+    and the plug-in's settings per plug-in; track choices and their plug-in
+    states belong to the song and are handed out for saving. Message thread only. */
+class InstrumentService final
 {
 public:
+    /** Track sound for the song library: choice plus the plug-in's state. */
+    struct TrackSound
+    {
+        settings::SoundSettings choice; ///< kind "main" follows the main sound
+        juce::MemoryBlock state;        ///< VST3 state, empty when none
+    };
+
     InstrumentService (diagnostics::RotatingLog& log, AudioService& audio, settings::SoundSettings& settings,
                        std::function<void()> saveSettings);
-    ~InstrumentService() override;
+    ~InstrumentService();
 
-    /** Restores the remembered instrument; falls back to the built-in synth. */
+    /** Restores the remembered main sound; falls back to the built-in one. */
     void restore();
-    /** Saves the plug-in's own settings. Call before shutdown. */
+    /** Saves the main plug-in's own settings. Call before shutdown. */
     void saveState();
 
-    void chooseBuiltIn();
+    void chooseMain (int soundId); ///< SoundView ids
     void chooseSoundFont (const std::filesystem::path& path);
-    void choosePlugin (std::size_t index);
     void addPluginFile (const juce::File& file);
     void startScan();
-    void showEditor();
+    /** Forgets skipped and known plug-ins and scans everything again. */
+    void rescanAll();
+    void addScanFolder (const juce::File& folder);
+    void removeScanFolder (std::size_t index);
+    /** -1 opens the main instrument's window, otherwise the track's. */
+    void showEditor (int part = -1);
+
+    /** A new song: its tracks' MIDI channels and saved sounds (may be empty). */
+    void setSong (std::vector<int> channels, std::vector<TrackSound> sounds);
+    void choosePart (std::size_t part, int soundId); ///< 0 = main sound
+    std::vector<int> partSoundIds() const;           ///< for the tracks list, 0 = main
+    /** Current choices and plug-in states, for the song library. */
+    std::vector<TrackSound> trackSounds() const;
 
     ui::SoundView view() const;
     std::function<void()> onChange;
+    std::function<void()> onTrackSoundsChanged;
 
 private:
-    void timerCallback() override;
-    bool loadPlugin (const juce::PluginDescription& description);
+    struct Slot
+    {
+        settings::SoundSettings choice;
+        int handle = AudioService::builtInHandle; ///< what actually plays
+        bool ownsHandle = false;                   ///< a plug-in instance of its own
+        std::string problem;
+    };
+
     void instruments (std::vector<juce::PluginDescription>& out) const;
+    const juce::PluginDescription* findPlugin (const std::string& id) const;
+    int soundIdOf (const settings::SoundSettings& choice) const;
+    settings::SoundSettings choiceFor (int soundId) const;
+    /** Makes the slot play its choice; returns false and sets problem on failure. */
+    bool realise (Slot& slot, const juce::MemoryBlock* state, bool drums);
+    void release (Slot& slot);
+    int soundFontHandle (const std::filesystem::path& path, std::string& error);
+    void releaseUnusedSoundFonts();
+    void applyRouting();
     void closeEditor();
     void saveKnownList();
+    juce::StringArray scanFolders() const;
+    juce::MemoryBlock readStateFile (const std::string& pluginId) const;
     void changed (std::string status);
 
     diagnostics::RotatingLog& log_;
@@ -59,11 +100,21 @@ private:
 
     juce::AudioPluginFormatManager formats_;
     juce::KnownPluginList known_;
-    std::unique_ptr<juce::PluginDirectoryScanner> scanner_;
-    std::unique_ptr<juce::DocumentWindow> editorWindow_;
+    PluginScanner scanner_;
+    std::vector<std::string> problems_;
+    std::string scanProgress_;
+    int added_ = 0;
+
+    Slot main_;
+    std::vector<Slot> parts_;
+    std::vector<int> channels_;
+    std::map<std::string, int> soundFonts_; ///< path -> handle, shared by every slot using it
+    std::string soundFontPath_;             ///< the SoundFont offered in the lists
     std::string soundFontName_;
+
+    std::unique_ptr<juce::DocumentWindow> editorWindow_;
+    int editorPart_ = -2;
     std::string status_;
-    int selected_ = 0; ///< SoundView ids
 };
 
 } // namespace pianoassist::app

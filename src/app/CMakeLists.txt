@@ -11,6 +11,7 @@ target_sources(PianoAssistApp PRIVATE
     SongLoader.cpp
     LessonController.cpp
     InstrumentService.cpp
+    PluginScanner.cpp
     AudioService.cpp
     ${PROJECT_SOURCE_DIR}/src/audio/InternalSynthRenderer.cpp
     ${PROJECT_SOURCE_DIR}/src/audio/PluginInstrumentRenderer.cpp

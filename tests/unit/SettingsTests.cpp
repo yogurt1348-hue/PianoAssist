@@ -32,6 +32,7 @@ Settings customSettings()
     s.sound.kind = "soundFont";
     s.sound.soundFontPath = "C:\\Users\\Илья\\Music\\GeneralUser GS.sf2";
     s.practice.waitForNotes = true;
+    s.sound.pluginFolders = { "D:\\VST3", "E:\\Плагины" };
     s.practice.tempoPercent = 75.0;
     s.appearance = { "light", "en", 1.25 };
     s.audio.deviceStateXml = "<DEVICESETUP deviceType=\"Windows Audio\"/>";

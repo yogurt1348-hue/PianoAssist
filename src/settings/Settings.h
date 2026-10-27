@@ -4,6 +4,7 @@
 #include "lesson_engine/PracticeProfile.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -45,7 +46,8 @@ struct PracticeChoices
     friend bool operator== (const PracticeChoices&, const PracticeChoices&) = default;
 };
 
-/** Which instrument plays the song. The plug-in identifier is JUCE's
+/** Which instrument plays the song (global main sound), or one track (kind
+    may then also be "main": follow the main sound). The plug-in identifier is JUCE's
     description identifier; the SoundFont path is UTF-8. */
 struct SoundSettings
 {
@@ -53,6 +55,7 @@ struct SoundSettings
     std::string pluginId;
     std::string pluginName;   ///< shown when the plug-in is missing
     std::string soundFontPath;
+    std::vector<std::string> pluginFolders; ///< extra VST3 folders to scan (UTF-8), global only
 
     friend bool operator== (const SoundSettings&, const SoundSettings&) = default;
 };
@@ -109,6 +112,8 @@ struct LoadResult
 };
 
 std::string toJson (const Settings& settings);
+std::string modeKey (lesson::PracticeMode mode);
+std::optional<lesson::PracticeMode> modeFromKey (const std::string& key);
 
 /** Never fails: unusable input yields defaults plus warnings. Invalid single
     fields fall back individually so one bad value does not reset the rest. */
