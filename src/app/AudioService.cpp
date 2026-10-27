@@ -123,14 +123,15 @@ void AudioService::previewKey (std::uint8_t pitch, bool down)
 }
 
 void AudioService::loadSong (const timeline::Song& song, const std::function<bool (const timeline::Note&)>& include,
-                             const std::function<double (const timeline::Note&)>& gain)
+                             const std::function<double (const timeline::Note&)>& gain, bool keepPlaying)
 {
     std::scoped_lock lock (listsMutex_);
     auto list = std::make_shared<const audio::PlaybackEventList> (audio::buildPlaybackEvents (song, nextListId_++, include, gain));
     if (current_)
         retired_.push_back (current_);
     current_ = list;
-    send ({ audio::PlaybackCommand::Type::setEvents, 0.0, current_.get() }, "load");
+    send ({ keepPlaying ? audio::PlaybackCommand::Type::replaceEvents : audio::PlaybackCommand::Type::setEvents, 0.0, current_.get() },
+          "load");
     log_.write (LogLevel::info, "audio", "Playback events prepared",
                 { { "events", std::to_string (list->events.size()) }, { "listId", std::to_string (list->id) } });
 }

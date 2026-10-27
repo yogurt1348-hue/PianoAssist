@@ -91,6 +91,83 @@ void PlaybackEngine::moveTo (double seconds) noexcept
     }
 }
 
+void PlaybackEngine::replaceEvents (const PlaybackEventList* events) noexcept
+{
+    // The same song with other parts switched on or off (mute, solo, practice
+    // mode): playback goes on from the same position. A sounding note stays
+    // when the new list still ends it later; otherwise it is released now, so
+    // switching a track off neither leaves hanging notes nor cuts the others.
+    if (events == nullptr || events_ == nullptr)
+    {
+        releaseOwned (0);
+        events_ = events;
+        moveTo (positionSeconds());
+        return;
+    }
+    events_ = events;
+    const auto& list = events_->events;
+    const auto position = positionSeconds();
+    cursor_ = static_cast<std::size_t> (std::lower_bound (list.begin(), list.end(), position,
+                                                          [] (const PlaybackEvent& e, double t) { return e.seconds < t; })
+                                        - list.begin());
+    constexpr std::size_t lookAhead = 8192; // bounded work on the audio thread
+    for (std::uint8_t channel = 0; channel < 16; ++channel)
+    {
+        if (owned_[channel].none())
+            continue;
+        for (std::uint8_t pitch = 0; pitch < 128; ++pitch)
+        {
+            if (! owned_[channel].test (pitch))
+                continue;
+            bool continues = false;
+            const auto end = std::min (list.size(), cursor_ + lookAhead);
+            for (auto i = cursor_; i < end; ++i)
+            {
+                const auto& e = list[i];
+                if ((e.status & 0x0Fu) != channel || e.data1 != pitch)
+                    continue;
+                const auto kind = e.status & 0xF0u;
+                if (kind == 0x80u || (kind == 0x90u && e.data2 == 0))
+                {
+                    continues = true;
+                    break;
+                }
+                if (kind == 0x90u)
+                    break;
+            }
+            if (! continues)
+            {
+                queueEvent ({ 0, static_cast<std::uint8_t> (0x80u | channel), pitch, 64 });
+                owned_[channel].reset (pitch);
+            }
+        }
+    }
+    // The pedal follows the new list at this position.
+    for (std::uint8_t channel = 0; channel < 16; ++channel)
+    {
+        if (! sustainOwned_.test (channel))
+            continue;
+        bool down = false;
+        for (auto i = cursor_; i > 0; --i)
+        {
+            const auto& e = list[i - 1];
+            if ((e.status & 0x0Fu) == channel && (e.status & 0xF0u) == 0xB0u && e.data1 == 64)
+            {
+                down = e.data2 >= 64;
+                break;
+            }
+        }
+        if (! down)
+        {
+            queueEvent ({ 0, static_cast<std::uint8_t> (0xB0u | channel), 64, 0 });
+            sustainOwned_.reset (channel);
+        }
+    }
+    queuePrograms();
+    if (state_ == PlaybackState::completed && cursor_ < list.size())
+        state_ = PlaybackState::paused;
+}
+
 void PlaybackEngine::restorePedal() noexcept
 {
     // After a seek or a loop jump into a pedalled passage, the pedal is down
@@ -130,6 +207,10 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
             queuePrograms();
             state_ = PlaybackState::stopped;
             moveTo (0.0);
+            break;
+
+        case Type::replaceEvents:
+            replaceEvents (command.events);
             break;
 
         case Type::play:

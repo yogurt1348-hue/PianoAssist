@@ -121,7 +121,7 @@ void LessonController::logTransport (const char* message, const AudioService::Sn
                   { "practice", practising_ ? std::string (lesson::toString (mode_)) : "off" } });
 }
 
-void LessonController::rebuild (double position, const char* why)
+void LessonController::rebuild (double position, const char* why, bool live)
 {
     if (! song_)
     {
@@ -150,8 +150,9 @@ void LessonController::rebuild (double position, const char* why)
         [song, gains] (const timeline::Note& note) {
             const auto part = song->partIndexOf (note);
             return part >= 0 && static_cast<std::size_t> (part) < gains.size() ? gains[static_cast<std::size_t> (part)] : 1.0;
-        });
-    if (position > 0.0)
+        },
+        live);
+    if (position > 0.0 && ! live)
         audio_.seek (position);
 
     if (practising_)
@@ -265,8 +266,8 @@ void LessonController::handle (const Intent& intent)
                     return;
                 practising_ = i.on;
                 log_.write (LogLevel::info, "lesson", i.on ? "Practice turned on" : "Practice turned off");
-                audio_.stop();
-                rebuild (audio.positionSeconds, i.on ? "practice on" : "practice off");
+                // Goes on from where it is: no jump, nothing replayed.
+                rebuild (audio.positionSeconds, i.on ? "practice on" : "practice off", true);
             }
             else if constexpr (std::is_same_v<T, SetMode>)
             {
@@ -274,8 +275,7 @@ void LessonController::handle (const Intent& intent)
                     return;
                 mode_ = i.mode;
                 log_.write (LogLevel::info, "lesson", "Practice mode changed", { { "mode", std::string (lesson::toString (mode_)) } });
-                audio_.stop();
-                rebuild (audio.positionSeconds, "mode changed");
+                rebuild (audio.positionSeconds, "mode changed", true);
             }
             else if constexpr (std::is_same_v<T, SetProfile>)
             {
@@ -302,8 +302,7 @@ void LessonController::handle (const Intent& intent)
                 log_.write (LogLevel::info, "lesson", "Accompaniment changed",
                             { { "playOtherPianoPart", accompaniment_.playOtherPianoPart ? "yes" : "no" },
                               { "playBacking", accompaniment_.playBacking ? "yes" : "no" } });
-                audio_.stop();
-                rebuild (audio.positionSeconds, "accompaniment changed");
+                rebuild (audio.positionSeconds, "accompaniment changed", true);
             }
             else if constexpr (std::is_same_v<T, SetMutedParts>)
             {
@@ -313,10 +312,7 @@ void LessonController::handle (const Intent& intent)
                 log_.write (LogLevel::info, "lesson", "Track mutes changed",
                             { { "muted", std::to_string (std::count (mutedParts_.begin(), mutedParts_.end(), true)) } });
                 // Keeps playing from where it was; only the event list changes.
-                const bool wasRunning = audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate;
-                rebuild (audio.positionSeconds, "track mutes changed");
-                if (wasRunning)
-                    audio_.play();
+                rebuild (audio.positionSeconds, "track mutes changed", true);
             }
             else if constexpr (std::is_same_v<T, SetTempo>)
             {
@@ -336,10 +332,7 @@ void LessonController::handle (const Intent& intent)
                 if (partGains_ == i.gains)
                     return;
                 partGains_ = i.gains;
-                const bool wasRunning = audio.state == PlaybackState::playing || audio.state == PlaybackState::waitingForGate;
-                rebuild (audio.positionSeconds, "track volumes changed");
-                if (wasRunning)
-                    audio_.play();
+                rebuild (audio.positionSeconds, "track volumes changed", true);
             }
             else if constexpr (std::is_same_v<T, PreviewKey>)
             {

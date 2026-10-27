@@ -52,9 +52,11 @@ public:
     std::string deviceStateXml() const;
 
     /** Plays only notes whose role passes the filter (practised hands are
-        played by the learner). Stops playback and returns to 0. */
+        played by the learner). Stops playback and returns to 0, unless
+        keepPlaying: then the same song's new list takes over at the current
+        position and state (mute, solo, practice changes). */
     void loadSong (const timeline::Song& song, const std::function<bool (const timeline::Note&)>& include,
-                   const std::function<double (const timeline::Note&)>& gain = {});
+                   const std::function<double (const timeline::Note&)>& gain = {}, bool keepPlaying = false);
     void setGate (double boundarySeconds); ///< negative clears
     void previewKey (std::uint8_t pitch, bool down);
     void play();

@@ -107,7 +107,9 @@ private:
     void post (Intent intent);
     void hiResTimerCallback() override;
     void handle (const Intent& intent);
-    void rebuild (double position, const char* why);
+    /** live: keep playing from the same position (only the parts that sound
+        or are checked change); otherwise playback stops there. */
+    void rebuild (double position, const char* why, bool live = false);
     void checkLoop (const AudioService::Snapshot& audio);
     /** Plays now, or after a count-in when it is on. */
     void startPlaying (double position);

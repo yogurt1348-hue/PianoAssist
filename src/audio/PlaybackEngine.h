@@ -28,6 +28,7 @@ struct PlaybackCommand
     enum class Type : std::uint8_t
     {
         setEvents, ///< list pointer; stops playback
+        replaceEvents, ///< list pointer for the same song; keeps position, state and the notes still in it
         play,
         pause,
         stop,      ///< back to zero
@@ -84,6 +85,7 @@ private:
     void releaseOwned (int sampleOffset) noexcept;
     void moveTo (double seconds) noexcept;
     void restorePedal() noexcept;
+    void replaceEvents (const PlaybackEventList* events) noexcept;
     bool queueEvent (const ScheduledMidiEvent& event) noexcept;
 
     const PlaybackEventList* events_ = nullptr;

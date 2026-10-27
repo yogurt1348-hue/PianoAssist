@@ -304,3 +304,49 @@ TEST_CASE ("Track volume scales velocities and zero leaves notes out")
     const auto none = buildPlaybackEvents (song.value(), 2, {}, [] (const timeline::Note&) { return 0.0; });
     CHECK (none.events.empty());
 }
+
+TEST_CASE ("Switching a track off while playing releases only its notes and keeps the position")
+{
+    // Two parts: C4 on channel 1 and C3 on channel 2, both held 0-2 s, then
+    // both strike again at 3 s.
+    PlaybackEventList both;
+    both.id = 1;
+    both.durationSeconds = 4.0;
+    both.events = { { 0.0, 0x90, 60, 100 }, { 0.0, 0x91, 48, 100 }, { 2.0, 0x80, 60, 64 }, { 2.0, 0x81, 48, 64 },
+                    { 3.0, 0x90, 60, 100 }, { 3.0, 0x91, 48, 100 }, { 3.5, 0x80, 60, 64 }, { 3.5, 0x81, 48, 64 } };
+    PlaybackEventList onlyFirst = both;
+    onlyFirst.id = 2;
+    std::erase_if (onlyFirst.events, [] (const PlaybackEvent& e) { return (e.status & 0x0F) == 1; });
+
+    PlaybackEngine engine;
+    RecordingRenderer renderer;
+    engine.prepare (48000.0);
+    send (engine, renderer, PlaybackCommand::Type::setEvents, 0.0, &both);
+    send (engine, renderer, PlaybackCommand::Type::play);
+    runFrames (engine, renderer, 24000, 256); // 0.5 s: both sounding
+    CHECK (engine.soundingNoteCount() == 2);
+    const auto before = engine.positionSeconds();
+
+    renderer.recorded.clear();
+    send (engine, renderer, PlaybackCommand::Type::replaceEvents, 0.0, &onlyFirst);
+    runFrames (engine, renderer, 256, 256);
+    CHECK (engine.state() == PlaybackState::playing);
+    CHECK (engine.positionSeconds() == Approx (before + 256.0 / 48000.0));
+    REQUIRE (renderer.count (0x80) == 1); // only C3 (channel 2) is released
+    CHECK (renderer.recorded[0].status == 0x81);
+    CHECK (renderer.recorded[0].data1 == 48);
+    CHECK (engine.soundingNoteCount() == 1); // C4 goes on
+
+    // Back on at 1 s: C3 is not restarted mid-note; both strike at 3 s.
+    runFrames (engine, renderer, 24000, 256);
+    send (engine, renderer, PlaybackCommand::Type::replaceEvents, 0.0, &both);
+    renderer.recorded.clear();
+    runFrames (engine, renderer, 48000 * 3, 256);
+    std::size_t c3On = 0, c4On = 0;
+    for (const auto& e : renderer.recorded)
+        if ((e.status & 0xF0) == 0x90)
+            ++(e.data1 == 48 ? c3On : c4On);
+    CHECK (c3On == 1);
+    CHECK (c4On == 1);
+    CHECK (engine.soundingNoteCount() == 0);
+}
