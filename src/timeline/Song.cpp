@@ -94,6 +94,14 @@ int Song::partIndexOf (const Note& note) const noexcept
     return -1;
 }
 
+int Song::partIndexOf (std::uint16_t track, std::uint8_t channel) const noexcept
+{
+    for (std::size_t i = 0; i < parts.size(); ++i)
+        if (parts[i].track == track && parts[i].channel == channel)
+            return static_cast<int> (i);
+    return -1;
+}
+
 std::vector<Part> inferParts (const smf::SmfFile& file)
 {
     std::map<std::pair<std::uint16_t, std::uint8_t>, Part> byKey;
@@ -110,7 +118,10 @@ std::vector<Part> inferParts (const smf::SmfFile& file)
     }
     for (const auto& change : file.programChanges)
         if (auto it = byKey.find ({ change.track, change.channel }); it != byKey.end() && it->second.program < 0)
+        {
             it->second.program = change.program;
+            it->second.bank = change.bank;
+        }
 
     std::vector<Part> parts;
     for (auto& [key, part] : byKey)
@@ -249,6 +260,11 @@ Result<Song> buildSong (const smf::SmfFile& file)
         song.sustainEvents.push_back ({ song.tempoMap.tickToSeconds (sustain.tick), sustain.track, sustain.channel, sustain.value });
     std::stable_sort (song.sustainEvents.begin(), song.sustainEvents.end(),
                       [] (const SustainEvent& a, const SustainEvent& b) { return a.seconds < b.seconds; });
+    for (const auto& change : file.programChanges)
+        song.programChanges.push_back ({ song.tempoMap.tickToSeconds (change.tick), change.track, change.channel, change.program,
+                                         change.bank });
+    std::stable_sort (song.programChanges.begin(), song.programChanges.end(),
+                      [] (const ProgramChange& a, const ProgramChange& b) { return a.seconds < b.seconds; });
 
     std::vector<Note> notes;
     notes.reserve (file.notes.size());

@@ -44,6 +44,7 @@ struct SmfProgramChange
     std::uint8_t channel = 0;
     std::uint8_t program = 0;
     std::int64_t tick = 0;
+    int bank = -1; ///< bank select in force (MSB * 128 + LSB), -1 when the track sent none
 };
 
 struct SmfSustain

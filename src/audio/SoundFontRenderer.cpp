@@ -4,6 +4,7 @@
 #include "core/Utf8Path.h"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 
 #if defined(_MSC_VER)
@@ -33,10 +34,26 @@ namespace pianoassist::audio
 {
 namespace
 {
+std::string lowerCase (std::string text)
+{
+    for (auto& c : text)
+        c = static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+    return text;
+}
+
 constexpr std::uintmax_t maxSoundFontBytes = 2'000'000'000ull;
 constexpr int maxVoices = 256;
 constexpr int drumChannel = 9; // MIDI channel 10
 } // namespace
+
+struct SoundFontRenderer::Template
+{
+    explicit Template (tsf* f) : font (f) {}
+    ~Template() { tsf_close (font); }
+    Template (const Template&) = delete;
+    Template& operator= (const Template&) = delete;
+    tsf* font;
+};
 
 Result<std::unique_ptr<SoundFontRenderer>> SoundFontRenderer::load (const std::filesystem::path& path)
 {
@@ -62,10 +79,17 @@ Result<std::unique_ptr<SoundFontRenderer>> SoundFontRenderer::fromMemory (const 
         tsf_close (font);
         return R::fail ("'" + name + "' contains no instruments");
     }
-    return R::ok (std::unique_ptr<SoundFontRenderer> (new SoundFontRenderer (font, std::move (name))));
+    auto source = std::make_shared<Template> (font);
+    auto* player = tsf_copy (font);
+    if (player == nullptr)
+        return R::fail ("Not enough memory for '" + name + "'");
+    return R::ok (std::unique_ptr<SoundFontRenderer> (new SoundFontRenderer (std::move (source), player, std::move (name))));
 }
 
-SoundFontRenderer::SoundFontRenderer (tsf* font, std::string name) : font_ (font), name_ (std::move (name)) {}
+SoundFontRenderer::SoundFontRenderer (std::shared_ptr<Template> source, tsf* font, std::string name)
+    : source_ (std::move (source)), font_ (font), name_ (std::move (name))
+{
+}
 
 SoundFontRenderer::~SoundFontRenderer()
 {
@@ -75,6 +99,53 @@ SoundFontRenderer::~SoundFontRenderer()
 int SoundFontRenderer::presetCount() const noexcept
 {
     return tsf_get_presetcount (font_);
+}
+
+std::vector<SoundFontPreset> SoundFontRenderer::presets() const
+{
+    std::vector<SoundFontPreset> list;
+    const auto* f = source_->font;
+    for (int i = 0; i < f->presetNum; ++i)
+    {
+        const auto& p = f->presets[i];
+        SoundFontPreset preset { p.bank, p.preset, p.presetName, p.bank == 128 };
+        const auto lower = lowerCase (preset.name);
+        if (lower.find ("drum") != std::string::npos || lower.find ("kit") != std::string::npos
+            || lower.find ("perc") != std::string::npos)
+            preset.drums = preset.drums || p.bank >= 120; // named kits in the high banks some fonts use
+        list.push_back (std::move (preset));
+    }
+    std::sort (list.begin(), list.end(), [] (const SoundFontPreset& a, const SoundFontPreset& b) {
+        return a.bank != b.bank ? a.bank < b.bank : a.program < b.program;
+    });
+    return list;
+}
+
+bool SoundFontRenderer::hasPreset (int bank, int program) const noexcept
+{
+    return tsf_get_presetindex (source_->font, bank, program) >= 0;
+}
+
+std::unique_ptr<SoundFontRenderer> SoundFontRenderer::copy() const
+{
+    auto* player = tsf_copy (source_->font);
+    if (player == nullptr)
+        return nullptr;
+    return std::unique_ptr<SoundFontRenderer> (new SoundFontRenderer (source_, player, name_));
+}
+
+void SoundFontRenderer::lockPreset (int bank, int program) noexcept
+{
+    lockedBank_ = bank;
+    lockedProgram_ = program;
+}
+
+void SoundFontRenderer::applyLock() noexcept
+{
+    if (lockedProgram_ < 0)
+        return;
+    for (int channel = 0; channel < 16; ++channel)
+        tsf_channel_set_bank_preset (font_, channel, lockedBank_, lockedProgram_);
 }
 
 void SoundFontRenderer::prepare (double sampleRate, int maxBlockFrames)
@@ -87,6 +158,7 @@ void SoundFontRenderer::prepare (double sampleRate, int maxBlockFrames)
         tsf_channel_set_presetnumber (font_, channel, 0, channel == drumChannel ? 1 : 0);
         tsf_channel_set_pitchrange (font_, channel, 2.0f);
     }
+    applyLock();
     interleaved_.assign (static_cast<std::size_t> (std::max (1, maxBlockFrames)) * 2u, 0.0f);
 }
 
@@ -106,9 +178,15 @@ void SoundFontRenderer::handle (const ScheduledMidiEvent& e) noexcept
             tsf_channel_note_off (font_, channel, e.data1);
             break;
         case 0xB0:
+            if (locked() && (e.data1 == 0 || e.data1 == 32))
+                break; // a chosen preset ignores the song's bank selects
             tsf_channel_midi_control (font_, channel, e.data1, e.data2);
+            if (locked() && e.data1 == 121)
+                tsf_channel_set_bank_preset (font_, channel, lockedBank_, lockedProgram_);
             break;
         case 0xC0:
+            if (locked())
+                break; // and its program changes
             tsf_channel_set_presetnumber (font_, channel, e.data1, channel == drumChannel ? 1 : 0);
             break;
         default:

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audio/IInstrumentRenderer.h"
+#include "audio/InstrumentRouter.h"
 #include "audio/PlaybackEvents.h"
 
 #include <array>
@@ -69,6 +70,14 @@ public:
     void queuePrograms() noexcept;
 
     void handle (const PlaybackCommand& command, IInstrumentRenderer& renderer) noexcept;
+    /** Releases the notes and pedal of these lanes (part lanes, then 16
+        channel lanes); call before their sound changes, then render the
+        pending events through the old routing (process with zero frames). */
+    void releaseLanes (const std::bitset<lane::maxParts + 16>& slots) noexcept;
+    /** Releases what the engine plays on lanes whose instrument differs
+        between the two routings. The releases are marked to go to the
+        instrument of the previous routing (see InstrumentRouter::render). */
+    void releaseRerouted (const InstrumentRouting& before, const InstrumentRouting& after) noexcept;
     void process (IInstrumentRenderer& renderer, RenderBlock block) noexcept;
 
     PlaybackState state() const noexcept { return state_; }
@@ -83,6 +92,9 @@ public:
 
 private:
     void releaseOwned (int sampleOffset) noexcept;
+    void releaseSlot (std::size_t slot, int sampleOffset, bool viaPrevious = false) noexcept;
+    static std::size_t slotOf (std::uint8_t laneId, std::uint8_t channel) noexcept;
+    static std::uint8_t laneOfSlot (std::size_t slot) noexcept;
     void moveTo (double seconds) noexcept;
     void restorePedal() noexcept;
     void replaceEvents (const PlaybackEventList* events) noexcept;
@@ -100,8 +112,12 @@ private:
     double gateSeconds_ = -1.0; ///< hold before events at this time; negative = none
     std::uint64_t gateArrivals_ = 0;
 
-    std::array<std::bitset<128>, 16> owned_ {};
-    std::bitset<16> sustainOwned_ {};
+    // Notes and pedal this engine started, per part lane (0..63) and per
+    // channel for events without a part (64..79).
+    static constexpr std::size_t slotCount = lane::maxParts + 16;
+    std::array<std::bitset<128>, slotCount> owned_ {};
+    std::bitset<slotCount> sustainOwned_ {};
+    std::array<std::uint8_t, slotCount> slotChannel_ {};
 
     std::array<ScheduledMidiEvent, maxEventsPerBlock> pending_ {};
     std::size_t pendingCount_ = 0;

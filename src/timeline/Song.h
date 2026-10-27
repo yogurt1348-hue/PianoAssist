@@ -28,6 +28,7 @@ struct Part
     std::uint8_t channel = 0;
     std::string trackName;
     int program = -1; ///< first program change, -1 when none
+    int bank = -1;    ///< bank select with that first program change, -1 when none
     std::size_t noteCount = 0;
     std::uint8_t lowestPitch = 127;
     std::uint8_t highestPitch = 0;
@@ -51,6 +52,16 @@ struct TimeSignatureAt
     int denominator = 4;
 };
 
+/** A program change of one part during the song (the first one included). */
+struct ProgramChange
+{
+    double seconds = 0.0;
+    std::uint16_t track = 0;
+    std::uint8_t channel = 0;
+    std::uint8_t program = 0;
+    int bank = -1;
+};
+
 struct SustainEvent
 {
     double seconds = 0.0;
@@ -67,6 +78,7 @@ struct Song
     std::vector<TimeSignatureAt> timeSignatures;
     std::vector<Part> parts;
     std::vector<SustainEvent> sustainEvents; ///< sorted by time
+    std::vector<ProgramChange> programChanges; ///< sorted by time
     std::vector<std::string> trackNames;
     std::vector<std::string> repairs;
     std::vector<std::string> warnings;
@@ -75,6 +87,7 @@ struct Song
 
     /** Index into parts for a note, or -1. */
     int partIndexOf (const Note& note) const noexcept;
+    int partIndexOf (std::uint16_t track, std::uint8_t channel) const noexcept;
 };
 
 /** Builds the timeline: ticks to seconds through the tempo map, roles from

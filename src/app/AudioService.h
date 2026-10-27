@@ -109,7 +109,8 @@ public:
     audio::IInstrumentRenderer* instrument (int handle) const;
     /** Main instrument plus, per MIDI channel, an instrument handle or -1 for
         "the main one". Unknown handles fall back to the main instrument. */
-    void setRouting (int mainHandle, const std::array<int, 16>& channelHandles);
+    /** partHandles: per part, its own instrument or -1 to follow its channel. */
+    void setRouting (int mainHandle, const std::array<int, 16>& channelHandles, const std::vector<int>& partHandles = {});
 
     /** Sample rate and block size the instrument must be prepared for. */
     std::pair<double, int> renderFormat() const;
@@ -147,6 +148,7 @@ private:
     std::vector<std::pair<std::unique_ptr<audio::InstrumentRouting>, std::uint64_t>> retiredRoutings_;
     std::atomic<const audio::InstrumentRouting*> activeRouting_ { nullptr };
     const audio::InstrumentRouting* lastRouting_ = nullptr; // audio thread only
+    const audio::InstrumentRouting* previousRouting_ = nullptr; // audio thread only, for the block after a change
     audio::InstrumentRouter router_;
     std::unique_ptr<RoutedRenderer> routed_;
     std::atomic<std::uint64_t> blocksRendered_ { 0 };

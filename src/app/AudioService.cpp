@@ -20,7 +20,7 @@ public:
         for (const auto& e : events)
             if ((e.status & 0xf0) == 0x90 && e.data2 > 0)
                 owner_.channelNotes_[e.status & 0x0f].fetch_add (1, std::memory_order_relaxed);
-        owner_.router_.render (*owner_.lastRouting_, events, block);
+        owner_.router_.render (*owner_.lastRouting_, events, block, owner_.previousRouting_);
     }
     void allNotesOff() noexcept override { forEach ([] (auto& r) { r.allNotesOff(); }); }
     void silence() noexcept override { forEach ([] (auto& r) { r.silence(); }); }
@@ -36,6 +36,9 @@ private:
         for (auto* r : routing.channels)
             if (r != nullptr && r != routing.main)
                 f (*r); // a renderer on several channels is called more than once: harmless
+        for (auto* r : routing.parts)
+            if (r != nullptr && r != routing.main)
+                f (*r);
     }
 
     AudioService& owner_;
@@ -230,7 +233,7 @@ audio::IInstrumentRenderer* AudioService::instrument (int handle) const
     return it != owned_.end() ? it->second.get() : nullptr;
 }
 
-void AudioService::setRouting (int mainHandle, const std::array<int, 16>& channelHandles)
+void AudioService::setRouting (int mainHandle, const std::array<int, 16>& channelHandles, const std::vector<int>& partHandles)
 {
     auto next = std::make_unique<audio::InstrumentRouting>();
     next->main = instrument (mainHandle);
@@ -244,12 +247,21 @@ void AudioService::setRouting (int mainHandle, const std::array<int, 16>& channe
                 next->channels[ch] = r;
                 routed += (routed.empty() ? "" : " ") + std::to_string (ch + 1);
             }
+    std::string parts;
+    for (std::size_t p = 0; p < partHandles.size() && p < audio::lane::maxParts; ++p)
+        if (partHandles[p] >= 0)
+            if (auto* r = instrument (partHandles[p]); r != nullptr)
+            {
+                next->parts[p] = r;
+                parts += (parts.empty() ? "" : " ") + std::to_string (p + 1);
+            }
     activeRouting_.store (next.get(), std::memory_order_release);
     retiredRoutings_.emplace_back (std::move (routing_), blocksRendered_.load());
     routing_ = std::move (next);
     const auto [rate, block] = renderFormat();
     log_.write (LogLevel::info, "audio", "Instruments routed",
                 { { "main", std::to_string (mainHandle) }, { "ownChannels", routed.empty() ? "(none)" : routed },
+                  { "ownParts", parts.empty() ? "(none)" : parts },
                   { "latencyFrames", std::to_string (routing_->main->reportedLatencyFrames()) },
                   { "rate", std::to_string (static_cast<int> (rate)) }, { "block", std::to_string (block) } });
 }
@@ -292,6 +304,7 @@ void AudioService::audioDeviceAboutToStart (juce::AudioIODevice* device)
             instrument->prepare (rate, block);
     }
     lastRouting_ = activeRouting_.load(); // the previous one may already be deleted
+    previousRouting_ = nullptr;
     engine_.prepare (rate);
     gain_.reset (rate, 0.02);
     gain_.setCurrentAndTargetValue (targetGain_.load());
@@ -323,10 +336,17 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
     {
         // New routing: instruments no longer used fall silent, the others
         // learn the channel programs. Notes they were playing are dropped.
+        // Parts whose instrument changed release their notes on the old one
+        // (this block only), so a sound change never leaves a hanging note
+        // and never cuts the notes of other parts.
         audio::InstrumentRouter::silenceDropped (*lastRouting_, *routing);
+        engine_.releaseRerouted (*lastRouting_, *routing);
+        previousRouting_ = lastRouting_;
         lastRouting_ = routing;
         engine_.queuePrograms();
     }
+    else
+        previousRouting_ = nullptr;
     if (lastCallbackMicros_ > 0)
     {
         const auto gap = blockStart - lastCallbackMicros_;

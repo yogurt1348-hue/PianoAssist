@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -13,7 +14,25 @@ struct ScheduledMidiEvent
     std::uint8_t status = 0;
     std::uint8_t data1 = 0;
     std::uint8_t data2 = 0;
+    /** Which part's sound plays it (see audio::lane); renderers ignore it. */
+    std::uint8_t lane = 254;
+    /** A release for a part whose sound just changed: it goes to the instrument
+        the part had before, so that one has no hanging note. */
+    bool viaPrevious = false;
 };
+
+/** Lanes: a part of the song (a track and channel) can have a sound of its
+    own, independent of other parts on the same MIDI channel. */
+namespace lane
+{
+inline constexpr std::size_t maxParts = 64;          ///< parts 0..63 get a lane each; later parts follow their channel
+inline constexpr std::uint8_t byChannel = 254;       ///< routed by MIDI channel only
+inline constexpr std::uint8_t preview = 255;         ///< previewed keys: always the main sound
+inline constexpr std::uint8_t ofPart (int part) noexcept
+{
+    return part >= 0 && static_cast<std::size_t> (part) < maxParts ? static_cast<std::uint8_t> (part) : byChannel;
+}
+} // namespace lane
 
 struct RenderBlock
 {

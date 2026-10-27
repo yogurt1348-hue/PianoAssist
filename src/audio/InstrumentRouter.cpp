@@ -18,6 +18,8 @@ std::size_t distinctOf (const InstrumentRouting& routing, std::array<IInstrument
     add (routing.main);
     for (auto* r : routing.channels)
         add (r);
+    for (auto* r : routing.parts)
+        add (r);
     return count;
 }
 } // namespace
@@ -25,7 +27,8 @@ std::size_t distinctOf (const InstrumentRouting& routing, std::array<IInstrument
 bool InstrumentRouting::uses (const IInstrumentRenderer* renderer) const noexcept
 {
     return renderer != nullptr
-           && (main == renderer || std::find (channels.begin(), channels.end(), renderer) != channels.end());
+           && (main == renderer || std::find (channels.begin(), channels.end(), renderer) != channels.end()
+               || std::find (parts.begin(), parts.end(), renderer) != parts.end());
 }
 
 InstrumentRouter::InstrumentRouter()
@@ -37,10 +40,10 @@ InstrumentRouter::InstrumentRouter()
 }
 
 void InstrumentRouter::render (const InstrumentRouting& routing, std::span<const ScheduledMidiEvent> events,
-                               RenderBlock block) noexcept
+                               RenderBlock block, const InstrumentRouting* previous) noexcept
 {
     if (block.numFrames <= chunkFrames)
-        return renderChunk (routing, events, block);
+        return renderChunk (routing, events, block, previous);
 
     // Rare: a device block larger than the scratch buffers. Render in chunks.
     for (int start = 0; start < block.numFrames; start += chunkFrames)
@@ -49,17 +52,18 @@ void InstrumentRouter::render (const InstrumentRouting& routing, std::span<const
         std::size_t n = 0;
         for (const auto& e : events)
             if (e.sampleOffset >= start && e.sampleOffset < start + count && n < chunkEvents_.size())
-                chunkEvents_[n++] = { e.sampleOffset - start, e.status, e.data1, e.data2 };
+                chunkEvents_[n++] = { e.sampleOffset - start, e.status, e.data1, e.data2, e.lane, e.viaPrevious };
         std::array<float*, 8> pointers {};
         const int channels = std::min (block.numChannels, static_cast<int> (pointers.size()));
         for (int ch = 0; ch < channels; ++ch)
             pointers[static_cast<std::size_t> (ch)] = block.channels[ch] != nullptr ? block.channels[ch] + start : nullptr;
-        renderChunk (routing, std::span<const ScheduledMidiEvent> (chunkEvents_.data(), n), { pointers.data(), channels, count });
+        renderChunk (routing, std::span<const ScheduledMidiEvent> (chunkEvents_.data(), n), { pointers.data(), channels, count },
+                     start == 0 ? previous : nullptr);
     }
 }
 
 void InstrumentRouter::renderChunk (const InstrumentRouting& routing, std::span<const ScheduledMidiEvent> events,
-                                    RenderBlock block) noexcept
+                                    RenderBlock block, const InstrumentRouting* previous) noexcept
 {
     const auto instruments = distinctOf (routing, distinct_);
     if (instruments == 0)
@@ -69,13 +73,14 @@ void InstrumentRouter::renderChunk (const InstrumentRouting& routing, std::span<
                 std::fill_n (block.channels[ch], block.numFrames, 0.0f);
         return;
     }
-    if (instruments == 1)
+    if (instruments == 1 && previous == nullptr)
         return distinct_[0]->render (events, block); // the common case: no split, no mixing
 
     std::fill (counts_.begin(), counts_.end(), 0);
     for (const auto& e : events)
     {
-        auto* target = routing.forChannel (e.status & 0x0F);
+        auto* target = e.viaPrevious && previous != nullptr ? previous->forEvent (e.lane, e.status & 0x0F)
+                                                            : routing.forEvent (e.lane, e.status & 0x0F);
         for (std::size_t i = 0; i < instruments; ++i)
             if (distinct_[i] == target && counts_[i] < maxEvents)
                 eventsFor_[i][counts_[i]++] = e;

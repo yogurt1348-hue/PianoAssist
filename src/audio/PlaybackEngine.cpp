@@ -37,8 +37,8 @@ double PlaybackEngine::positionSeconds() const noexcept
 std::size_t PlaybackEngine::soundingNoteCount() const noexcept
 {
     std::size_t count = 0;
-    for (const auto& channel : owned_)
-        count += channel.count();
+    for (const auto& slot : owned_)
+        count += slot.count();
     return count;
 }
 
@@ -53,27 +53,104 @@ bool PlaybackEngine::queueEvent (const ScheduledMidiEvent& event) noexcept
     return true;
 }
 
+std::size_t PlaybackEngine::slotOf (std::uint8_t laneId, std::uint8_t channel) noexcept
+{
+    return laneId < lane::maxParts ? laneId : lane::maxParts + (channel & 0x0Fu);
+}
+
+std::uint8_t PlaybackEngine::laneOfSlot (std::size_t slot) noexcept
+{
+    return slot < lane::maxParts ? static_cast<std::uint8_t> (slot) : lane::byChannel;
+}
+
+void PlaybackEngine::releaseSlot (std::size_t slot, int sampleOffset, bool viaPrevious) noexcept
+{
+    const auto channel = slotChannel_[slot];
+    const auto laneId = laneOfSlot (slot);
+    for (std::uint8_t pitch = 0; pitch < 128; ++pitch)
+        if (owned_[slot].test (pitch))
+            queueEvent ({ sampleOffset, static_cast<std::uint8_t> (0x80u | channel), pitch, 64, laneId, viaPrevious });
+    owned_[slot].reset();
+    if (sustainOwned_.test (slot))
+        queueEvent ({ sampleOffset, static_cast<std::uint8_t> (0xB0u | channel), 64, 0, laneId, viaPrevious });
+    sustainOwned_.reset (slot);
+}
+
 void PlaybackEngine::releaseOwned (int sampleOffset) noexcept
 {
-    for (std::uint8_t channel = 0; channel < 16; ++channel)
+    for (std::size_t slot = 0; slot < slotCount; ++slot)
+        if (owned_[slot].any() || sustainOwned_.test (slot))
+            releaseSlot (slot, sampleOffset);
+}
+
+void PlaybackEngine::releaseLanes (const std::bitset<lane::maxParts + 16>& slots) noexcept
+{
+    for (std::size_t slot = 0; slot < slotCount; ++slot)
+        if (slots.test (slot) && (owned_[slot].any() || sustainOwned_.test (slot)))
+            releaseSlot (slot, 0);
+}
+
+void PlaybackEngine::releaseRerouted (const InstrumentRouting& before, const InstrumentRouting& after) noexcept
+{
+    for (std::size_t slot = 0; slot < slotCount; ++slot)
     {
-        for (std::uint8_t pitch = 0; pitch < 128; ++pitch)
-            if (owned_[channel].test (pitch))
-                queueEvent ({ sampleOffset, static_cast<std::uint8_t> (0x80u | channel), pitch, 64 });
-        owned_[channel].reset();
-        if (sustainOwned_.test (channel))
-            queueEvent ({ sampleOffset, static_cast<std::uint8_t> (0xB0u | channel), 64, 0 });
+        if (owned_[slot].none() && ! sustainOwned_.test (slot))
+            continue;
+        const auto laneId = laneOfSlot (slot);
+        const int channel = slot < lane::maxParts ? slotChannel_[slot] : static_cast<int> (slot - lane::maxParts);
+        if (before.forEvent (laneId, channel) != after.forEvent (laneId, channel))
+            releaseSlot (slot, 0, true);
     }
-    sustainOwned_.reset();
 }
 
 void PlaybackEngine::queuePrograms() noexcept
 {
+    // Each channel and each part gets the sound the song has at the playhead:
+    // the last program change (and bank) before it, or the part's first one.
     if (events_ == nullptr)
         return;
     for (std::uint8_t channel = 0; channel < 16; ++channel)
         if (const auto program = events_->programs[channel]; program >= 0)
-            queueEvent ({ 0, static_cast<std::uint8_t> (0xC0u | channel), static_cast<std::uint8_t> (program), 0 });
+            queueEvent ({ 0, static_cast<std::uint8_t> (0xC0u | channel), static_cast<std::uint8_t> (program), 0, lane::byChannel });
+
+    std::array<LaneStart, lane::maxParts> now = events_->lanes;
+    std::bitset<lane::maxParts> known;
+    const auto& list = events_->events;
+    for (auto i = std::min (cursor_, list.size()); i > 0 && ! known.all(); --i)
+    {
+        const auto& e = list[i - 1];
+        if (e.lane >= lane::maxParts || (e.status & 0xF0u) != 0xC0u || known.test (e.lane))
+            continue;
+        known.set (e.lane);
+        now[e.lane].program = e.data1;
+        now[e.lane].bank = -1;
+        // Its bank selects come right before it, at the same time.
+        int msb = -1, lsb = -1;
+        for (auto j = i - 1; j > 0; --j)
+        {
+            const auto& b = list[j - 1];
+            if (b.seconds != e.seconds)
+                break;
+            if (b.lane == e.lane && (b.status & 0xF0u) == 0xB0u && (b.data1 == 0 || b.data1 == 32))
+                (b.data1 == 0 ? msb : lsb) = b.data2;
+        }
+        if (msb >= 0)
+            now[e.lane].bank = static_cast<std::int16_t> (msb * 128 + std::max (lsb, 0));
+    }
+    for (std::size_t l = 0; l < lane::maxParts; ++l)
+    {
+        const auto& start = now[l];
+        if (start.program < 0)
+            continue;
+        const auto laneId = static_cast<std::uint8_t> (l);
+        const auto channel = static_cast<std::uint8_t> (start.channel & 0x0Fu);
+        if (start.bank >= 0)
+        {
+            queueEvent ({ 0, static_cast<std::uint8_t> (0xB0u | channel), 0, static_cast<std::uint8_t> ((start.bank >> 7) & 0x7F), laneId });
+            queueEvent ({ 0, static_cast<std::uint8_t> (0xB0u | channel), 32, static_cast<std::uint8_t> (start.bank & 0x7F), laneId });
+        }
+        queueEvent ({ 0, static_cast<std::uint8_t> (0xC0u | channel), static_cast<std::uint8_t> (start.program), 0, laneId });
+    }
 }
 
 void PlaybackEngine::moveTo (double seconds) noexcept
@@ -111,20 +188,21 @@ void PlaybackEngine::replaceEvents (const PlaybackEventList* events) noexcept
                                                           [] (const PlaybackEvent& e, double t) { return e.seconds < t; })
                                         - list.begin());
     constexpr std::size_t lookAhead = 8192; // bounded work on the audio thread
-    for (std::uint8_t channel = 0; channel < 16; ++channel)
+    for (std::size_t slot = 0; slot < slotCount; ++slot)
     {
-        if (owned_[channel].none())
+        if (owned_[slot].none())
             continue;
+        const auto channel = slotChannel_[slot];
         for (std::uint8_t pitch = 0; pitch < 128; ++pitch)
         {
-            if (! owned_[channel].test (pitch))
+            if (! owned_[slot].test (pitch))
                 continue;
             bool continues = false;
             const auto end = std::min (list.size(), cursor_ + lookAhead);
             for (auto i = cursor_; i < end; ++i)
             {
                 const auto& e = list[i];
-                if ((e.status & 0x0Fu) != channel || e.data1 != pitch)
+                if ((e.status & 0x0Fu) != channel || e.data1 != pitch || slotOf (e.lane, channel) != slot)
                     continue;
                 const auto kind = e.status & 0xF0u;
                 if (kind == 0x80u || (kind == 0x90u && e.data2 == 0))
@@ -137,21 +215,22 @@ void PlaybackEngine::replaceEvents (const PlaybackEventList* events) noexcept
             }
             if (! continues)
             {
-                queueEvent ({ 0, static_cast<std::uint8_t> (0x80u | channel), pitch, 64 });
-                owned_[channel].reset (pitch);
+                queueEvent ({ 0, static_cast<std::uint8_t> (0x80u | channel), pitch, 64, laneOfSlot (slot) });
+                owned_[slot].reset (pitch);
             }
         }
     }
     // The pedal follows the new list at this position.
-    for (std::uint8_t channel = 0; channel < 16; ++channel)
+    for (std::size_t slot = 0; slot < slotCount; ++slot)
     {
-        if (! sustainOwned_.test (channel))
+        if (! sustainOwned_.test (slot))
             continue;
+        const auto channel = slotChannel_[slot];
         bool down = false;
         for (auto i = cursor_; i > 0; --i)
         {
             const auto& e = list[i - 1];
-            if ((e.status & 0x0Fu) == channel && (e.status & 0xF0u) == 0xB0u && e.data1 == 64)
+            if ((e.status & 0x0Fu) == channel && (e.status & 0xF0u) == 0xB0u && e.data1 == 64 && slotOf (e.lane, channel) == slot)
             {
                 down = e.data2 >= 64;
                 break;
@@ -159,8 +238,8 @@ void PlaybackEngine::replaceEvents (const PlaybackEventList* events) noexcept
         }
         if (! down)
         {
-            queueEvent ({ 0, static_cast<std::uint8_t> (0xB0u | channel), 64, 0 });
-            sustainOwned_.reset (channel);
+            queueEvent ({ 0, static_cast<std::uint8_t> (0xB0u | channel), 64, 0, laneOfSlot (slot) });
+            sustainOwned_.reset (slot);
         }
     }
     queuePrograms();
@@ -176,24 +255,26 @@ void PlaybackEngine::restorePedal() noexcept
     if (events_ == nullptr)
         return;
     const auto& list = events_->events;
-    std::bitset<16> known;
+    std::bitset<slotCount> known;
     for (auto i = cursor_; i > 0; --i)
     {
         const auto& e = list[i - 1];
         if ((e.status & 0xF0u) != 0xB0u || e.data1 != 64)
             continue;
-        const auto channel = static_cast<std::size_t> (e.status & 0x0Fu);
-        if (known.test (channel))
+        const auto channel = static_cast<std::uint8_t> (e.status & 0x0Fu);
+        const auto slot = slotOf (e.lane, channel);
+        if (known.test (slot))
             continue;
-        known.set (channel);
+        known.set (slot);
         if (e.data2 >= 64)
         {
-            sustainOwned_.set (channel);
-            queueEvent ({ 0, e.status, 64, e.data2 });
+            sustainOwned_.set (slot);
+            slotChannel_[slot] = channel;
+            queueEvent ({ 0, e.status, 64, e.data2, e.lane });
         }
-        if (known.all())
-            break;
     }
+    // The sound of each part at this point, too (programs may change during the song).
+    queuePrograms();
 }
 
 void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer& renderer) noexcept
@@ -204,9 +285,9 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
         case Type::setEvents:
             releaseOwned (0);
             events_ = command.events;
-            queuePrograms();
             state_ = PlaybackState::stopped;
             moveTo (0.0);
+            queuePrograms();
             break;
 
         case Type::replaceEvents:
@@ -217,7 +298,10 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
             if (events_ == nullptr)
                 break;
             if (state_ == PlaybackState::completed)
+            {
                 moveTo (0.0);
+                queuePrograms();
+            }
             state_ = PlaybackState::playing;
             break;
 
@@ -233,6 +317,7 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
             releaseOwned (0);
             state_ = PlaybackState::stopped;
             moveTo (0.0);
+            queuePrograms();
             break;
 
         case Type::seek:
@@ -261,7 +346,7 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
             const auto pitch = static_cast<std::uint8_t> (std::clamp (std::abs (command.value) - 1.0, 0.0, 127.0));
             const bool on = command.value > 0.0;
             queueEvent ({ 0, static_cast<std::uint8_t> ((on ? 0x90u : 0x80u) | PlaybackCommand::previewChannel), pitch,
-                          static_cast<std::uint8_t> (on ? 90 : 64) });
+                          static_cast<std::uint8_t> (on ? 90 : 64), lane::preview });
             break;
         }
 
@@ -315,24 +400,27 @@ void PlaybackEngine::process (IInstrumentRenderer& renderer, RenderBlock block) 
             const auto offset = static_cast<int> (std::clamp<std::int64_t> (frameOf (e.seconds) - framesSinceAnchor_, 0,
                                                                             block.numFrames - 1));
             const auto kind = e.status & 0xF0u;
-            const auto channel = e.status & 0x0Fu;
+            const auto channel = static_cast<std::uint8_t> (e.status & 0x0Fu);
+            const auto slot = slotOf (e.lane, channel);
             if (kind == 0x90u)
             {
-                if (owned_[channel].test (e.data1))
-                    queueEvent ({ offset, static_cast<std::uint8_t> (0x80u | channel), e.data1, 64 });
-                owned_[channel].set (e.data1);
+                if (owned_[slot].test (e.data1))
+                    queueEvent ({ offset, static_cast<std::uint8_t> (0x80u | channel), e.data1, 64, e.lane });
+                owned_[slot].set (e.data1);
+                slotChannel_[slot] = channel;
             }
             else if (kind == 0x80u)
             {
-                if (! owned_[channel].test (e.data1))
+                if (! owned_[slot].test (e.data1))
                     continue; // started before a seek point: nothing to release
-                owned_[channel].reset (e.data1);
+                owned_[slot].reset (e.data1);
             }
             else if (kind == 0xB0u && e.data1 == 64)
             {
-                sustainOwned_.set (channel, e.data2 >= 64);
+                sustainOwned_.set (slot, e.data2 >= 64);
+                slotChannel_[slot] = channel;
             }
-            queueEvent ({ offset, e.status, e.data1, e.data2 });
+            queueEvent ({ offset, e.status, e.data1, e.data2, e.lane });
         }
 
         framesSinceAnchor_ += framesToPlay;

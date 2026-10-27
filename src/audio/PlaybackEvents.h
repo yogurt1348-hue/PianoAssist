@@ -1,5 +1,6 @@
 #pragma once
 
+#include "audio/IInstrumentRenderer.h"
 #include "timeline/Song.h"
 
 #include <array>
@@ -17,6 +18,15 @@ struct PlaybackEvent
     std::uint8_t status = 0;
     std::uint8_t data1 = 0;
     std::uint8_t data2 = 0;
+    std::uint8_t lane = 254; ///< the part (lane::ofPart), or lane::byChannel
+};
+
+/** A part's sound at the start of the song: what the file selects before its first note. */
+struct LaneStart
+{
+    std::int16_t program = -1; ///< -1 when the file sets none
+    std::int16_t bank = -1;    ///< MSB * 128 + LSB, -1 when none
+    std::uint8_t channel = 0;
 };
 
 /** Immutable, time-sorted event list built on the control thread. At equal
@@ -30,6 +40,10 @@ struct PlaybackEventList
         Sent to the instrument whenever the list or the instrument changes,
         so seeking never loses the sound of a channel. */
     std::array<std::int16_t, 16> programs { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+    /** Per part lane: the sound before any program change in the list. The
+        list also holds the file's later program changes (and bank selects)
+        at their times, so seek and loop restore the sound of that moment. */
+    std::array<LaneStart, lane::maxParts> lanes {};
 };
 
 /** include decides which notes sound (by role, part...); sustain events

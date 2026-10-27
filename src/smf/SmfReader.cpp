@@ -138,9 +138,15 @@ private:
         {
             file_.sustainEvents.push_back ({ index_, channel, data2, tick });
         }
+        else if (kind == 0xB0u && (data1 == 0 || data1 == 32))
+        {
+            (data1 == 0 ? bankMsb_ : bankLsb_)[channel] = data2;
+        }
         else if (kind == 0xC0u)
         {
-            file_.programChanges.push_back ({ index_, channel, data1, tick });
+            const int msb = bankMsb_[channel], lsb = bankLsb_[channel];
+            const int bank = msb >= 0 ? msb * 128 + std::max (lsb, 0) : lsb;
+            file_.programChanges.push_back ({ index_, channel, data1, tick, bank });
         }
         return std::nullopt;
     }
@@ -199,6 +205,8 @@ private:
     }
 
     std::uint16_t index_;
+    std::array<int, 16> bankMsb_ { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+    std::array<int, 16> bankLsb_ { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
     SmfFile& file_;
     std::size_t& eventBudget_;
     std::map<std::pair<std::uint8_t, std::uint8_t>, std::deque<OpenNote>> open_;
