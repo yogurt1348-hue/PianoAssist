@@ -71,6 +71,7 @@ public:
         std::function<void (std::size_t part, bool muted)> partMuteChanged;
         std::function<void (std::size_t part, double volume)> partVolumeChanged;
         std::function<void()> openSongFolder;
+        std::function<void()> showLibrary;
         std::function<void()> openLibraryFolder;
         std::function<void()> checkForUpdates;
         std::function<void (std::size_t part, int soundId)> partSoundChanged; ///< SoundView ids; 0 = default sound

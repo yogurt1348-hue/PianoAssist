@@ -15,6 +15,7 @@
 #include "settings/SongLibrary.h"
 #include "ui/AppLookAndFeel.h"
 #include "ui/MainComponent.h"
+#include "ui/LibraryComponent.h"
 #include "ui/SettingsComponent.h"
 #include "ui/Translations.h"
 
@@ -545,6 +546,7 @@ private:
                 openFolder (songFolder_, "song");
         };
         i.openLibraryFolder = [this] { openFolder (libraryRoot (settings_.library.root), "library"); };
+        i.showLibrary = [this] { showLibrary(); };
         i.checkForUpdates = [this] { checkForUpdates(); };
         i.partSoundChanged = [this] (std::size_t part, int soundId) { instruments_->choosePart (part, soundId); };
         i.keyClicked = [this] (std::uint8_t pitch, bool down) { lesson_->previewKey (pitch, down); };
@@ -797,6 +799,89 @@ private:
         });
     }
 
+    // --- song library window ---------------------------------------------------------------------
+
+    void showLibrary()
+    {
+        if (libraryWindow_ == nullptr)
+        {
+            ui::LibraryComponent::Intents i;
+            i.open = [this] (std::size_t row) {
+                if (row >= librarySongs_.size())
+                    return;
+                const auto& song = librarySongs_[row];
+                auto loaded = settings::loadManifest (song.folder);
+                libraryWindow_->setVisible (false);
+                openSong (toFile (song.folder / pathFromUtf8 (loaded.manifest.midiFile)));
+            };
+            i.openFolder = [this] (std::size_t row) {
+                if (row < librarySongs_.size())
+                    openFolder (librarySongs_[row].folder, "song");
+            };
+            i.remove = [this] (std::size_t row) { if (row < librarySongs_.size()) removeFromLibrary (librarySongs_[row]); };
+            i.refresh = [this] { refreshLibrary(); };
+            i.openLibraryFolder = [this] { openFolder (libraryRoot (settings_.library.root), "library"); };
+            library_ui_ = new ui::LibraryComponent (std::move (i));
+            libraryWindow_ = std::make_unique<ToolWindow> (TRANS ("Song library"), library_ui_);
+            libraryWindow_->centreAroundComponent (window_.get(), library_ui_->getWidth(), library_ui_->getHeight());
+        }
+        refreshLibrary();
+        libraryWindow_->setVisible (true);
+        libraryWindow_->toFront (true);
+        log_->write (LogLevel::info, "ui", "Song library opened", { { "songs", std::to_string (librarySongs_.size()) } });
+    }
+
+    void refreshLibrary()
+    {
+        if (library_ui_ == nullptr)
+            return;
+        const auto root = libraryRoot (settings_.library.root);
+        librarySongs_ = settings::listSongs (root);
+        std::vector<ui::LibraryRow> rows;
+        for (const auto& s : librarySongs_)
+        {
+            ui::LibraryRow row { s.name, pathToUtf8 (s.folder.filename()), {}, s.sourcePath, s.midiMissing };
+            if (! s.lastOpenedAt.empty())
+                row.lastOpened = juce::Time::fromISO8601 (toJuce (s.lastOpenedAt)).formatted ("%d.%m.%Y %H:%M").toStdString();
+            rows.push_back (std::move (row));
+        }
+        library_ui_->setRows (std::move (rows), pathToUtf8 (root));
+    }
+
+    void removeFromLibrary (const settings::SongEntry& song)
+    {
+        const auto text = TRANS ("Remove \"%1\" from the library?").replace ("%1", toJuce (song.name)) + "\n\n"
+                          + TRANS ("This deletes the library's copy, its saved settings and plug-in states. The original MIDI file is not deleted:")
+                          + "\n" + toJuce (song.sourcePath.empty() ? std::string ("-") : song.sourcePath);
+        auto options = juce::MessageBoxOptions::makeOptionsOkCancel (juce::MessageBoxIconType::QuestionIcon, TRANS ("Remove from library"),
+                                                                     text, TRANS ("Remove"), TRANS ("Cancel"), library_ui_);
+        juce::AlertWindow::showAsync (options, [this, folder = song.folder] (int result) {
+            if (result != 1)
+                return;
+            if (! songFolder_.empty() && std::filesystem::equivalent (songFolder_, folder))
+                closeSong();
+            const auto midiPrefix = pathToUtf8 (folder);
+            auto removed = settings::removeSong (libraryRoot (settings_.library.root), folder);
+            if (! removed)
+            {
+                log_->write (LogLevel::error, "library", "Remove failed", { { "error", removed.error() } });
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, TRANS ("Could not remove the song"),
+                                                        toJuce (removed.error()));
+            }
+            else
+            {
+                log_->write (LogLevel::info, "library", "Song removed from library", { { "folder", fileNameForLog (folder) } });
+                auto& recent = settings_.recentFiles;
+                recent.erase (std::remove_if (recent.begin(), recent.end(),
+                                              [&] (const std::string& p) { return p.rfind (midiPrefix, 0) == 0; }),
+                              recent.end());
+                content_->setRecentFiles (recent);
+                saveSettings();
+            }
+            refreshLibrary();
+        });
+    }
+
     // --- songs ----------------------------------------------------------------------------------
 
     void chooseMidiFile()
@@ -896,12 +981,20 @@ private:
         song_ = std::move (song).value();
         songFolder_ = folder;
         manifest_ = std::move (manifest);
+        manifest_.lastOpenedAt = settings::currentTimeIso();
+        if (! songFolder_.empty())
+        {
+            // Only the time stamp changes here: the rest is still what was on disk.
+            if (auto saved = settings::saveManifest (songFolder_, manifest_); ! saved)
+                log_->write (LogLevel::warning, "library", "Could not record when the song was opened", { { "error", saved.error() } });
+        }
         songTitle_ = manifest_.name;
         songNotices_ = notices;
         lastStateHashes_.clear();
         applyManifest();
         rememberRecent (pathToUtf8 (midi));
         log_->write (LogLevel::info, "song", "Song shown in piano roll");
+        refreshLibrary();
     }
 
     /** Applies the song's saved choices; nothing starts playing. */
@@ -1308,6 +1401,9 @@ private:
     std::unique_ptr<ToolWindow> settingsWindow_;
     ui::SettingsComponent* settings_ui_ = nullptr; // owned by settingsWindow_
     std::unique_ptr<ToolWindow> helpWindow_;
+    std::unique_ptr<ToolWindow> libraryWindow_;
+    ui::LibraryComponent* library_ui_ = nullptr; // owned by libraryWindow_
+    std::vector<settings::SongEntry> librarySongs_;
     std::unique_ptr<juce::FileChooser> chooser_;
     std::unique_ptr<UpdateChecker> updates_;
     juce::File lastFolder_ = juce::File::getSpecialLocation (juce::File::userMusicDirectory);

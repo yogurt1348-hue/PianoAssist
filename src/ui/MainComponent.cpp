@@ -1012,6 +1012,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         showTab (1 - tab_);
     else if (code == 'T')
         toleranceBox_.setSelectedId (toleranceBox_.getSelectedId() % 3 + 1, juce::sendNotificationSync);
+    else if (code == 'B' && intents_.showLibrary)
+        intents_.showLibrary();
     else if (code == ',' && intents_.openSettings)
         intents_.openSettings (SettingsPage::midiAndAudio);
     else if (code == 'L')
@@ -1045,6 +1047,7 @@ juce::PopupMenu MainComponent::getMenuForIndex (int index, const juce::String&)
                 recent.addItem (file.getFileName(), [this, file] { if (intents_.openMidiFile) intents_.openMidiFile (file); });
             }
             menu.addSubMenu (TRANS ("Recent files"), recent, ! recent_.empty());
+            menu.addItem (juce::PopupMenu::Item (TRANS ("Song library...")).setAction (call (intents_.showLibrary))| shortcut ("Ctrl+B"));
             menu.addItem (TRANS ("Open song folder"), hasSong, false, call (intents_.openSongFolder));
             menu.addItem (TRANS ("Open library folder"), call (intents_.openLibraryFolder));
             menu.addItem (juce::PopupMenu::Item (TRANS ("Close file")).setEnabled (hasSong).setAction (call (intents_.closeSong))| shortcut ("Ctrl+W"));

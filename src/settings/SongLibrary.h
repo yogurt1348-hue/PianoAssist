@@ -46,6 +46,7 @@ struct SongManifest
     std::string midiSha256;
     std::string sourcePath;      ///< where the MIDI was imported from (UTF-8), for information only
     std::string importedAt;      ///< ISO 8601 UTC
+    std::string lastOpenedAt;    ///< ISO 8601 UTC, empty until first opened
     std::vector<TrackState> tracks;
     PracticeChoices practice;
     int tolerance = 1;           ///< 0 strict, 1 normal, 2 easy
@@ -62,6 +63,9 @@ struct SongEntry
     std::string id;
     std::string name;
     std::string midiSha256;
+    std::string lastOpenedAt;
+    std::string sourcePath;   ///< where it was imported from (information only)
+    bool midiMissing = false; ///< the copy in the song folder is gone
 };
 
 struct LoadedManifest
@@ -91,7 +95,13 @@ LoadedManifest manifestFromJson (std::string_view json);
     that already holds the same MIDI. The source file is only read. */
 Result<ImportResult> importMidi (const std::filesystem::path& root, const std::filesystem::path& source,
                                  const std::string& displayName);
+/** Songs in the library, most recently opened first, then by name. */
 std::vector<SongEntry> listSongs (const std::filesystem::path& root);
+/** Deletes a song folder from the library: its MIDI copy, settings and
+    plug-in states. Only a folder directly inside root that holds a
+    manifest is touched; the original MIDI it was imported from never is. */
+Result<bool> removeSong (const std::filesystem::path& root, const std::filesystem::path& folder);
+std::string currentTimeIso();
 
 /** Never fails: a missing or damaged manifest yields defaults (and keeps the
     damaged file as manifest.json.bad for diagnosis). */

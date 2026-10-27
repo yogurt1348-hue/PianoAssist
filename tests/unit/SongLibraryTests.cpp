@@ -97,6 +97,38 @@ TEST_CASE ("Importing copies the MIDI, never changes the original, and reuses id
     CHECK (listSongs (root).size() == 2);
 }
 
+TEST_CASE ("The library lists recent songs first, flags a missing copy and removes only its own folder")
+{
+    const auto dir = scratchDir ("pianoassist_library_list");
+    const auto root = dir / "Songs";
+    const auto a = writeFile (dir / "in" / "a.mid", readText (test::fixturePath ("format0_c_major_scale_120bpm.mid")));
+    const auto b = writeFile (dir / "in2" / "a.mid", readText (test::fixturePath ("practice_split_hands.mid")));
+    const auto first = importMidi (root, a, "Same name").value().entry;
+    const auto second = importMidi (root, b, "Same name").value().entry;
+    CHECK (first.folder != second.folder); // same names, separate songs
+
+    auto opened = loadManifest (second.folder).manifest;
+    opened.lastOpenedAt = "2026-10-27T09:00:00Z";
+    REQUIRE (saveManifest (second.folder, opened).isOk());
+    auto songs = listSongs (root);
+    REQUIRE (songs.size() == 2);
+    CHECK (songs[0].id == second.id); // opened most recently
+    CHECK (songs[0].lastOpenedAt == "2026-10-27T09:00:00Z");
+    CHECK (songs[1].sourcePath == pathToUtf8 (a));
+
+    fs::remove (first.folder / "song.mid");
+    songs = listSongs (root);
+    CHECK (songs[1].midiMissing);
+
+    // Removing never reaches outside the library, and keeps the original.
+    CHECK_FALSE (removeSong (root, dir / "in").isOk());
+    CHECK (fs::exists (a));
+    REQUIRE (removeSong (root, first.folder).isOk());
+    CHECK_FALSE (fs::exists (first.folder));
+    CHECK (fs::exists (a));
+    CHECK (listSongs (root).size() == 1);
+}
+
 TEST_CASE ("Song settings round-trip and stay separate per song")
 {
     const auto dir = scratchDir ("pianoassist_library_roundtrip");

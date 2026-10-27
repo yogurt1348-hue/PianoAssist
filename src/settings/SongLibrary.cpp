@@ -150,7 +150,7 @@ std::string toJson (const SongManifest& m)
             { "tempoPercent", m.practice.tempoPercent },
             { "tolerance", m.tolerance } } },
         { "loop", { { "enabled", m.loop.enabled }, { "startSeconds", m.loop.startSeconds }, { "endSeconds", m.loop.endSeconds } } },
-        { "view", { { "positionSeconds", m.positionSeconds }, { "pixelsPerSecond", m.pixelsPerSecond } } },
+        { "view", { { "positionSeconds", m.positionSeconds }, { "pixelsPerSecond", m.pixelsPerSecond }, { "lastOpenedAt", m.lastOpenedAt } } },
     };
     return root.dump (2);
 }
@@ -248,6 +248,8 @@ LoadedManifest manifestFromJson (std::string_view text)
     if (const auto view = root.find ("view"); view != root.end() && view->is_object())
     {
         readValue (*view, "positionSeconds", m.positionSeconds, warnings, "view");
+        if (view->contains ("lastOpenedAt"))
+            readValue (*view, "lastOpenedAt", m.lastOpenedAt, warnings, "view");
         readValue (*view, "pixelsPerSecond", m.pixelsPerSecond, warnings, "view");
         if (! finiteIn (m.positionSeconds, 0.0, 1.0e6))
             m.positionSeconds = 0.0;
@@ -313,10 +315,35 @@ std::vector<SongEntry> listSongs (const fs::path& root)
         const auto loaded = manifestFromJson (std::string_view (reinterpret_cast<const char*> (data.data()), data.size()));
         if (loaded.recovered)
             continue;
-        songs.push_back ({ it->path(), loaded.manifest.id, loaded.manifest.name, loaded.manifest.midiSha256 });
+        const auto& m = loaded.manifest;
+        std::error_code missing;
+        songs.push_back ({ it->path(), m.id, m.name, m.midiSha256, m.lastOpenedAt, m.sourcePath,
+                           ! fs::is_regular_file (it->path() / pathFromUtf8 (m.midiFile), missing) });
     }
-    std::sort (songs.begin(), songs.end(), [] (const SongEntry& a, const SongEntry& b) { return a.name < b.name; });
+    std::sort (songs.begin(), songs.end(), [] (const SongEntry& a, const SongEntry& b) {
+        if (a.lastOpenedAt != b.lastOpenedAt)
+            return a.lastOpenedAt > b.lastOpenedAt; // ISO 8601 UTC sorts as text
+        return a.name != b.name ? a.name < b.name : a.id < b.id;
+    });
     return songs;
+}
+
+std::string currentTimeIso() { return nowIso(); }
+
+Result<bool> removeSong (const fs::path& root, const fs::path& folder)
+{
+    using R = Result<bool>;
+    std::error_code ec;
+    const auto canonicalRoot = fs::weakly_canonical (root, ec);
+    const auto canonicalFolder = fs::weakly_canonical (folder, ec);
+    if (ec || canonicalFolder.parent_path() != canonicalRoot)
+        return R::fail ("Not a song folder of this library.");
+    if (! fs::is_regular_file (canonicalFolder / manifestName, ec))
+        return R::fail ("The folder has no song settings; nothing was deleted.");
+    fs::remove_all (canonicalFolder, ec);
+    if (ec)
+        return R::fail ("Could not delete the song folder: " + ec.message());
+    return R::ok (true);
 }
 
 LoadedManifest loadManifest (const fs::path& folder)

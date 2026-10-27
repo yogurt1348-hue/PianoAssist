@@ -280,6 +280,25 @@ constexpr Pair pairs[] = {
     { "Count-in", "Отсчёт" },
     { "Count-in before playing (one bar)", "Отсчёт перед игрой (один такт)" },
 
+    // Song library
+    { "Song library...", "Библиотека композиций..." },
+    { "Song library", "Библиотека композиций" },
+    { "Songs in the library", "Композиции в библиотеке" },
+    { "No songs yet. Open a MIDI file: a copy is added here with its own settings.", "Композиций пока нет. Откройте MIDI-файл: его копия появится здесь со своими настройками." },
+    { "Remove from library...", "Убрать из библиотеки..." },
+    { "Remove from library", "Убрать из библиотеки" },
+    { "Remove", "Убрать" },
+    { "Cancel", "Отмена" },
+    { "Refresh", "Обновить" },
+    { "Library folder", "Папка библиотеки" },
+    { "not opened yet", "ещё не открывалась" },
+    { "opened", "открыта" },
+    { "Deletes the library's copy and this song's settings. The original MIDI file is not touched.", "Удаляет копию в библиотеке и настройки композиции. Исходный MIDI-файл не затрагивается." },
+    { "The MIDI copy in the song folder is missing. Open the file again to re-import it.", "Копия MIDI в папке композиции пропала. Откройте исходный файл снова, чтобы импортировать его заново." },
+    { "Remove \"%1\" from the library?", "Убрать «%1» из библиотеки?" },
+    { "This deletes the library's copy, its saved settings and plug-in states. The original MIDI file is not deleted:", "Будут удалены копия в библиотеке, сохранённые настройки и состояния плагинов. Исходный MIDI-файл не удаляется:" },
+    { "Could not remove the song", "Не удалось убрать композицию" },
+
     // Application dialogs
     { "How to practise", "Как заниматься" },
     { "How to practise\n\n"
