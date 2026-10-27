@@ -129,7 +129,13 @@ std::string toJson (const Settings& s)
         { "practice",
           { { "mode", modeKey (s.practice.mode) },
             { "playOtherPianoPart", s.practice.accompaniment.playOtherPianoPart },
-            { "playBacking", s.practice.accompaniment.playBacking } } },
+            { "playBacking", s.practice.accompaniment.playBacking },
+            { "waitForNotes", s.practice.waitForNotes },
+            { "tempoPercent", s.practice.tempoPercent } } },
+        { "appearance",
+          { { "theme", s.appearance.theme }, { "language", s.appearance.language }, { "uiScale", s.appearance.uiScale } } },
+        { "audio", { { "deviceStateXml", s.audio.deviceStateXml } } },
+        { "recent", { { "files", s.recentFiles } } },
     };
     return root.dump (2);
 }
@@ -192,6 +198,30 @@ LoadResult fromJson (std::string_view text)
     s.practice.mode = modeFromKey (mode).value_or (lesson::PracticeMode::bothHands);
     reader.read ("practice", "playOtherPianoPart", s.practice.accompaniment.playOtherPianoPart);
     reader.read ("practice", "playBacking", s.practice.accompaniment.playBacking);
+
+    reader.read ("practice", "waitForNotes", s.practice.waitForNotes);
+    reader.read ("practice", "tempoPercent", s.practice.tempoPercent,
+                 [] (const double& v) { return finiteIn (v, 25.0, 200.0); });
+
+    reader.read ("appearance", "theme", s.appearance.theme,
+                 [] (const std::string& v) { return v == "dark" || v == "light"; });
+    reader.read ("appearance", "language", s.appearance.language,
+                 [] (const std::string& v) { return v == "ru" || v == "en"; });
+    reader.read ("appearance", "uiScale", s.appearance.uiScale, [] (const double& v) { return finiteIn (v, 0.75, 2.0); });
+    reader.read ("audio", "deviceStateXml", s.audio.deviceStateXml,
+                 [] (const std::string& v) { return v.size() <= 16 * 1024; });
+
+    if (const auto recent = root.find ("recent"); recent != root.end() && recent->is_object())
+        if (const auto files = recent->find ("files"); files != recent->end())
+        {
+            if (! files->is_array())
+                result.warnings.push_back ("recent.files has the wrong type; using default.");
+            else
+                for (const auto& file : *files)
+                    if (file.is_string() && ! file.get<std::string>().empty() && file.get<std::string>().size() <= 4096
+                        && s.recentFiles.size() < maxRecentFiles)
+                        s.recentFiles.push_back (file.get<std::string>());
+        }
 
     reader.read ("sound", "kind", s.sound.kind, [] (const std::string& kind) {
         return kind == "builtIn" || kind == "soundFont" || kind == "plugin";

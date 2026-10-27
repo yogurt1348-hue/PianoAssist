@@ -31,7 +31,7 @@ void PlaybackEngine::prepare (double sampleRate) noexcept
 
 double PlaybackEngine::positionSeconds() const noexcept
 {
-    return anchorSeconds_ + static_cast<double> (framesSinceAnchor_) / sampleRate_;
+    return anchorSeconds_ + static_cast<double> (framesSinceAnchor_) * rate_ / sampleRate_;
 }
 
 std::size_t PlaybackEngine::soundingNoteCount() const noexcept
@@ -155,6 +155,15 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
             break;
         }
 
+        case Type::setRate:
+        {
+            // Re-anchor at the current position so time already played is kept.
+            anchorSeconds_ = positionSeconds();
+            framesSinceAnchor_ = 0;
+            rate_ = std::clamp (std::isfinite (command.value) ? command.value : 1.0, minRate, maxRate);
+            break;
+        }
+
         case Type::setGate:
             gateSeconds_ = command.value;
             if (state_ == PlaybackState::waitingForGate
@@ -172,7 +181,7 @@ void PlaybackEngine::process (IInstrumentRenderer& renderer, RenderBlock block) 
         // Frames are counted from the anchor and rounded to the nearest
         // sample, so scheduling is identical for every buffer size.
         const auto frameOf = [this] (double seconds) {
-            return static_cast<std::int64_t> (std::llround ((seconds - anchorSeconds_) * sampleRate_));
+            return static_cast<std::int64_t> (std::llround ((seconds - anchorSeconds_) * sampleRate_ / rate_));
         };
 
         // A gate inside this block cuts it short: events at the gate itself

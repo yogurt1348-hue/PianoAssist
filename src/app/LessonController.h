@@ -70,6 +70,8 @@ public:
     void setAccompaniment (lesson::Accompaniment accompaniment);
     /** Per song part: true silences it (the "Other tracks" tab). */
     void setMutedParts (std::vector<bool> muted);
+    /** Tempo as song seconds per real second (0.25-2.0); keeps the position. */
+    void setTempo (double rate);
     void previewKey (std::uint8_t pitch, bool down); ///< a click on the on-screen keyboard
 
     PracticeSnapshot snapshot() const;
@@ -86,7 +88,8 @@ private:
     struct SetAccompaniment { lesson::Accompaniment accompaniment; };
     struct SetMutedParts { std::vector<bool> muted; };
     struct PreviewKey { std::uint8_t pitch; bool down; };
-    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, SetAccompaniment, SetMutedParts, PreviewKey>;
+    struct SetTempo { double rate; };
+    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, SetAccompaniment, SetMutedParts, PreviewKey, SetTempo>;
 
     void post (Intent intent);
     void hiResTimerCallback() override;

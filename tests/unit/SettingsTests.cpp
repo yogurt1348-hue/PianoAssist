@@ -31,6 +31,11 @@ Settings customSettings()
     s.practice.accompaniment.playBacking = false;
     s.sound.kind = "soundFont";
     s.sound.soundFontPath = "C:\\Users\\Илья\\Music\\GeneralUser GS.sf2";
+    s.practice.waitForNotes = true;
+    s.practice.tempoPercent = 75.0;
+    s.appearance = { "light", "en", 1.25 };
+    s.audio.deviceStateXml = "<DEVICESETUP deviceType=\"Windows Audio\"/>";
+    s.recentFiles = { "C:\\Music\\Прелюдия.mid", "D:\\song.mid" };
     return s;
 }
 } // namespace
@@ -136,4 +141,22 @@ TEST_CASE ("Unknown instrument kinds fall back to the built-in synth")
     CHECK (loaded.status == LoadStatus::recovered);
     CHECK (loaded.settings.sound.kind == "builtIn");
     CHECK (loaded.settings.sound.pluginName == "X");
+}
+
+TEST_CASE ("Appearance, tempo and recent files are validated")
+{
+    const auto loaded = fromJson (R"({"schemaVersion": 1,
+        "appearance": {"theme": "pink", "language": "de", "uiScale": 9},
+        "practice": {"tempoPercent": 10},
+        "recent": {"files": ["a.mid", 5, "", "b.mid", "c.mid", "d.mid", "e.mid", "f.mid", "g.mid", "h.mid", "i.mid"]}})");
+    CHECK (loaded.status == LoadStatus::recovered);
+    CHECK (loaded.settings.appearance == AppearanceSettings {});
+    CHECK (loaded.settings.practice.tempoPercent == 100.0);
+    REQUIRE (loaded.settings.recentFiles.size() == maxRecentFiles);
+    CHECK (loaded.settings.recentFiles.front() == "a.mid");
+    CHECK (loaded.settings.recentFiles[1] == "b.mid");
+
+    const auto notArray = fromJson (R"({"schemaVersion": 1, "recent": {"files": "a.mid"}})");
+    CHECK (notArray.status == LoadStatus::recovered);
+    CHECK (notArray.settings.recentFiles.empty());
 }

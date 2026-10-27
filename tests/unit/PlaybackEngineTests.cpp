@@ -263,3 +263,31 @@ TEST_CASE ("A gate boundary behind the playhead holds in place, never jumps back
     engine.handle ({ audio::PlaybackCommand::Type::setGate, 3.0 }, renderer);
     CHECK (engine.state() == audio::PlaybackState::playing);
 }
+
+TEST_CASE ("Tempo slows the song without moving the played position")
+{
+    const auto list = scaleEvents();
+    PlaybackEngine engine;
+    RecordingRenderer renderer;
+    engine.prepare (48000.0);
+    send (engine, renderer, PlaybackCommand::Type::setEvents, 0.0, &list);
+    send (engine, renderer, PlaybackCommand::Type::play);
+    runFrames (engine, renderer, 24000, 256); // 0.5 s of song at 100%
+    const auto before = engine.positionSeconds();
+
+    send (engine, renderer, PlaybackCommand::Type::setRate, 0.5);
+    CHECK (engine.rate() == Approx (0.5));
+    CHECK (engine.positionSeconds() == Approx (before)); // no jump
+
+    // F4 starts at song 1.5 s: 1.0 s of song after `before` takes 2 s at half speed.
+    runFrames (engine, renderer, 48000 * 3, 256);
+    const auto playedFrames = static_cast<std::int64_t> (std::ceil (24000.0 / 256.0)) * 256;
+    for (const auto& e : renderer.recorded)
+        if (e.status == 0x90 && e.data1 == 65)
+            CHECK (e.frame == playedFrames + std::llround ((1.5 - before) * 2.0 * 48000.0));
+
+    send (engine, renderer, PlaybackCommand::Type::setRate, 100.0);
+    CHECK (engine.rate() == Approx (PlaybackEngine::maxRate));
+    send (engine, renderer, PlaybackCommand::Type::setRate, 0.0);
+    CHECK (engine.rate() == Approx (PlaybackEngine::minRate));
+}

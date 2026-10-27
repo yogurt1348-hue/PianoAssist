@@ -39,6 +39,8 @@ struct PracticeChoices
 {
     lesson::PracticeMode mode = lesson::PracticeMode::bothHands;
     lesson::Accompaniment accompaniment;
+    bool waitForNotes = false;   ///< "Wait for my notes" (practice) on at start
+    double tempoPercent = 100.0; ///< 25-200
 
     friend bool operator== (const PracticeChoices&, const PracticeChoices&) = default;
 };
@@ -55,6 +57,27 @@ struct SoundSettings
     friend bool operator== (const SoundSettings&, const SoundSettings&) = default;
 };
 
+/** Look of the window. Theme and language apply at once or after a restart
+    (language); scale is the whole-window zoom. */
+struct AppearanceSettings
+{
+    std::string theme = "dark";   ///< dark or light
+    std::string language = "ru";  ///< ru or en
+    double uiScale = 1.0;         ///< 0.75-2.0
+
+    friend bool operator== (const AppearanceSettings&, const AppearanceSettings&) = default;
+};
+
+/** Audio output chosen in Settings; empty means the system default. */
+struct AudioSettings
+{
+    std::string deviceStateXml; ///< JUCE AudioDeviceManager state
+
+    friend bool operator== (const AudioSettings&, const AudioSettings&) = default;
+};
+
+inline constexpr std::size_t maxRecentFiles = 8;
+
 struct Settings
 {
     MidiInputSettings midiInput;
@@ -63,6 +86,9 @@ struct Settings
     lesson::InputCalibration calibration;
     PracticeChoices practice;
     SoundSettings sound;
+    AppearanceSettings appearance;
+    AudioSettings audio;
+    std::vector<std::string> recentFiles; ///< UTF-8 paths, newest first
 
     friend bool operator== (const Settings&, const Settings&) = default;
 };

@@ -4,6 +4,7 @@
 #include "lesson_engine/Gate.h"
 
 #include <algorithm>
+#include <cmath>
 #include <unordered_map>
 
 namespace pianoassist::app
@@ -93,6 +94,7 @@ void LessonController::loadSong (std::shared_ptr<const timeline::Song> song, boo
 }
 void LessonController::setAccompaniment (lesson::Accompaniment a) { post (SetAccompaniment { a }); }
 void LessonController::setMutedParts (std::vector<bool> muted) { post (SetMutedParts { std::move (muted) }); }
+void LessonController::setTempo (double rate) { post (SetTempo { rate }); }
 void LessonController::playPause() { post (PlayPause {}); }
 void LessonController::stop() { post (Stop {}); }
 void LessonController::seek (double s) { post (Seek { s }); }
@@ -273,6 +275,12 @@ void LessonController::handle (const Intent& intent)
                 if (wasRunning)
                     audio_.play();
             }
+            else if constexpr (std::is_same_v<T, SetTempo>)
+            {
+                log_.write (LogLevel::info, "lesson", "Tempo changed",
+                            { { "percent", std::to_string (static_cast<int> (std::lround (i.rate * 100.0))) } });
+                audio_.setRate (i.rate);
+            }
             else if constexpr (std::is_same_v<T, PreviewKey>)
             {
                 log_.write (LogLevel::debug, "ui", i.down ? "On-screen key down" : "On-screen key up",
@@ -293,12 +301,14 @@ void LessonController::handleInput (const midi_io::InputEvent& event, const Audi
     // Map the press to song time. While held, song time is frozen where the
     // transport stopped (the gate boundary, or later if the boundary was
     // already behind it); the wall time since arrival measures lateness.
-    const auto offset = inputOffsetMs_ / 1000.0;
+    // Wall time becomes song time at the current tempo.
+    const auto rate = audio.rate;
+    const auto offset = inputOffsetMs_ / 1000.0 * rate;
     double songTime = 0.0;
     if (audio.state == PlaybackState::waitingForGate)
-        songTime = audio.positionSeconds + static_cast<double> (event.timestampMicros - audio.arrivalMicros) / 1.0e6 - offset;
+        songTime = audio.positionSeconds + static_cast<double> (event.timestampMicros - audio.arrivalMicros) / 1.0e6 * rate - offset;
     else
-        songTime = audio.blockStartPosition + static_cast<double> (event.timestampMicros - audio.blockStartMicros) / 1.0e6 - offset;
+        songTime = audio.blockStartPosition + static_cast<double> (event.timestampMicros - audio.blockStartMicros) / 1.0e6 * rate - offset;
 
     const auto result = session_->press (event.data1, songTime);
     lastVerdict_ = noteName (event.data1) + ": " + lesson::toString (result.verdict);

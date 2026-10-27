@@ -89,6 +89,7 @@ void AudioService::pause() { send ({ audio::PlaybackCommand::Type::pause }, "pau
 void AudioService::stop() { send ({ audio::PlaybackCommand::Type::stop }, "stop"); }
 void AudioService::seek (double seconds) { send ({ audio::PlaybackCommand::Type::seek, seconds }, "seek"); }
 void AudioService::silence() { send ({ audio::PlaybackCommand::Type::silence }, "silence"); }
+void AudioService::setRate (double rate) { send ({ audio::PlaybackCommand::Type::setRate, rate }, "rate"); }
 void AudioService::setGain (float linearGain) { targetGain_.store (juce::jlimit (0.0f, 1.0f, linearGain)); }
 
 AudioService::Snapshot AudioService::snapshot() const
@@ -113,6 +114,7 @@ AudioService::Snapshot AudioService::snapshot() const
         s.blockStartMicros = blockStartMicros_.load (std::memory_order_relaxed);
         s.gateArrivals = gateArrivals_.load (std::memory_order_relaxed);
         s.arrivalMicros = arrivalMicros_.load (std::memory_order_relaxed);
+        s.rate = rate_.load (std::memory_order_relaxed);
         std::atomic_thread_fence (std::memory_order_acquire);
         if (blockSeq_.load (std::memory_order_relaxed) == before)
             break;
@@ -221,6 +223,7 @@ void AudioService::audioDeviceIOCallbackWithContext (const float* const*, int, f
     }
     blockStartPosition_.store (startPosition, std::memory_order_relaxed);
     blockStartMicros_.store (blockStart, std::memory_order_relaxed);
+    rate_.store (engine_.rate(), std::memory_order_relaxed);
     blockSeq_.store (seq + 2, std::memory_order_release);
 
     gain_.setTargetValue (targetGain_.load (std::memory_order_relaxed));

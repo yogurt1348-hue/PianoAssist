@@ -33,6 +33,7 @@ public:
         std::int64_t blockStartMicros = 0; ///< steady clock at the start of the last callback
         std::uint64_t gateArrivals = 0;
         std::int64_t arrivalMicros = 0;    ///< steady clock of the block that reached the last gate
+        double rate = 1.0;                 ///< tempo: song seconds per real second
     };
 
     static std::int64_t nowMicros() noexcept;
@@ -54,6 +55,8 @@ public:
     void seek (double seconds);
     void silence();
     void setGain (float linearGain);
+    /** Tempo, 0.25-2.0 (1 = as written); keeps the position. */
+    void setRate (double rate);
 
     Snapshot snapshot() const;
     std::string deviceDescription() const;
@@ -117,6 +120,7 @@ private:
     std::atomic<std::int64_t> blockStartMicros_ { 0 };
     std::atomic<std::uint64_t> gateArrivals_ { 0 };
     std::atomic<std::int64_t> arrivalMicros_ { 0 };
+    std::atomic<double> rate_ { 1.0 };
 };
 
 } // namespace pianoassist::app

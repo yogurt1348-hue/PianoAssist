@@ -36,6 +36,7 @@ struct PlaybackCommand
         setGain,   ///< value = linear gain
         setGate,   ///< value = boundary seconds, negative = no gate; releases a hold when moved past it
         preview,   ///< value = pitch + 1 for note-on, -(pitch + 1) for note-off; independent of the song
+        setRate,   ///< value = song seconds per real second (tempo), clamped to [minRate, maxRate]
     };
 
     /** MIDI channel (0-based) for previewed keys, kept apart from song notes. */
@@ -58,6 +59,8 @@ class PlaybackEngine
 {
 public:
     static constexpr std::size_t maxEventsPerBlock = 2048;
+    static constexpr double minRate = 0.25;
+    static constexpr double maxRate = 2.0;
 
     void prepare (double sampleRate) noexcept;
     /** Queues each channel's program for the next block; call after the
@@ -74,6 +77,8 @@ public:
     std::size_t droppedEventCount() const noexcept { return dropped_; }
     /** Increments every time playback arrives at a gate and holds. */
     std::uint64_t gateArrivals() const noexcept { return gateArrivals_; }
+    /** Tempo: song seconds per real second (1 = as written). */
+    double rate() const noexcept { return rate_; }
 
 private:
     void releaseOwned (int sampleOffset) noexcept;
@@ -82,6 +87,7 @@ private:
 
     const PlaybackEventList* events_ = nullptr;
     double sampleRate_ = 48000.0;
+    double rate_ = 1.0;
     PlaybackState state_ = PlaybackState::stopped;
 
     double anchorSeconds_ = 0.0;      ///< song position when anchorFrames_ was zero
