@@ -222,7 +222,10 @@ void PlaybackEngine::process (IInstrumentRenderer& renderer, RenderBlock block) 
             // Hold exactly at the boundary. Owned notes and pedal are released
             // so voices decay naturally; future events are not scheduled.
             releaseOwned (static_cast<int> (std::min<std::int64_t> (framesToPlay, block.numFrames - 1)));
-            anchorSeconds_ = gateSeconds_;
+            // A boundary already behind the playhead (a fast passage where the
+            // next gate's window ended before the previous gate was passed)
+            // holds where the song is; it never jumps back.
+            anchorSeconds_ = std::max (gateSeconds_, positionSeconds());
             framesSinceAnchor_ = 0;
             state_ = PlaybackState::waitingForGate;
             ++gateArrivals_;

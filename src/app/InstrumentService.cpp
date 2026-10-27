@@ -19,7 +19,12 @@ juce::File toFile (const std::filesystem::path& path)
 
 juce::File knownListFile() { return toFile (userDataDirectory() / "plugins.xml"); }
 juce::File deadMansPedal() { return toFile (userDataDirectory() / "plugin-scan-in-progress.txt"); }
-std::filesystem::path stateFile() { return userDataDirectory() / "instrument-state.bin"; }
+/** One file per plug-in, so switching between several keeps each one's sounds. */
+std::filesystem::path stateFile (const std::string& pluginId)
+{
+    const auto hash = juce::String::toHexString (static_cast<juce::int64> (std::hash<std::string> {} (pluginId)));
+    return userDataDirectory() / pathFromUtf8 ("instrument-" + hash.toStdString() + ".state");
+}
 
 /** The plug-in's window. Closing it only hides the editor; the plug-in keeps playing. */
 class PluginWindow final : public juce::DocumentWindow
@@ -135,7 +140,7 @@ void InstrumentService::saveState()
     std::vector<std::uint8_t> bytes (id.begin(), id.end());
     const auto* data = static_cast<const std::uint8_t*> (state.getData());
     bytes.insert (bytes.end(), data, data + state.getSize());
-    if (const auto written = writeFileAtomically (stateFile(), bytes); ! written)
+    if (const auto written = writeFileAtomically (stateFile (settings_.pluginId), bytes); ! written)
         log_.write (LogLevel::error, "sound", "Could not save the instrument's settings", { { "error", written.error() } });
     else
         log_.write (LogLevel::info, "sound", "Instrument settings saved", { { "bytes", std::to_string (state.getSize()) } });
@@ -195,7 +200,7 @@ bool InstrumentService::loadPlugin (const juce::PluginDescription& description)
     }
 
     const auto id = description.createIdentifierString().toStdString();
-    if (auto bytes = readBinaryFile (stateFile(), 64u * 1024u * 1024u); bytes && ! bytes.value().empty())
+    if (auto bytes = readBinaryFile (stateFile (id), 64u * 1024u * 1024u); bytes && ! bytes.value().empty())
     {
         const auto& data = bytes.value();
         const auto newline = std::find (data.begin(), data.end(), static_cast<std::uint8_t> ('\n'));

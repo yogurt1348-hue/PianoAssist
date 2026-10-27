@@ -231,3 +231,35 @@ TEST_CASE ("Previewed keys sound on their own channel, with or without a song")
     CHECK (renderer.seen[1].data1 == 60);
     CHECK (engine.state() == audio::PlaybackState::stopped);
 }
+
+TEST_CASE ("A gate boundary behind the playhead holds in place, never jumps back")
+{
+    struct Null final : audio::IInstrumentRenderer
+    {
+        void prepare (double, int) override {}
+        void render (std::span<const audio::ScheduledMidiEvent>, audio::RenderBlock) noexcept override {}
+        void allNotesOff() noexcept override {}
+        void silence() noexcept override {}
+        int reportedLatencyFrames() const noexcept override { return 0; }
+    } renderer;
+
+    audio::PlaybackEventList list;
+    list.durationSeconds = 10.0;
+    list.events.push_back ({ 5.0, 0x90, 60, 90 });
+    list.events.push_back ({ 6.0, 0x80, 60, 64 });
+    audio::PlaybackEngine engine;
+    engine.prepare (48000.0);
+    engine.handle ({ audio::PlaybackCommand::Type::setEvents, 0.0, &list }, renderer);
+    engine.handle ({ audio::PlaybackCommand::Type::play }, renderer);
+    for (int i = 0; i < 100; ++i) // about 1.07 s
+        engine.process (renderer, { nullptr, 2, 512 });
+    const auto before = engine.positionSeconds();
+
+    engine.handle ({ audio::PlaybackCommand::Type::setGate, 0.5 }, renderer); // already passed
+    engine.process (renderer, { nullptr, 2, 512 });
+    CHECK (engine.state() == audio::PlaybackState::waitingForGate);
+    CHECK (engine.positionSeconds() == Approx (before));
+
+    engine.handle ({ audio::PlaybackCommand::Type::setGate, 3.0 }, renderer);
+    CHECK (engine.state() == audio::PlaybackState::playing);
+}

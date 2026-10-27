@@ -269,13 +269,13 @@ void LessonController::handleInput (const midi_io::InputEvent& event, const Audi
     if (audio.state != PlaybackState::playing && audio.state != PlaybackState::waitingForGate)
         return; // gates only judge presses while the song runs or waits
 
-    // Map the press to song time. While held at a gate, song time is frozen
-    // at the boundary; the wall time since arrival measures lateness.
+    // Map the press to song time. While held, song time is frozen where the
+    // transport stopped (the gate boundary, or later if the boundary was
+    // already behind it); the wall time since arrival measures lateness.
     const auto offset = inputOffsetMs_ / 1000.0;
-    const auto boundary = session_->nextBoundarySeconds();
     double songTime = 0.0;
-    if (audio.state == PlaybackState::waitingForGate && boundary)
-        songTime = *boundary + static_cast<double> (event.timestampMicros - audio.arrivalMicros) / 1.0e6 - offset;
+    if (audio.state == PlaybackState::waitingForGate)
+        songTime = audio.positionSeconds + static_cast<double> (event.timestampMicros - audio.arrivalMicros) / 1.0e6 - offset;
     else
         songTime = audio.blockStartPosition + static_cast<double> (event.timestampMicros - audio.blockStartMicros) / 1.0e6 - offset;
 
