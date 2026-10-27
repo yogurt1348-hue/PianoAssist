@@ -139,8 +139,15 @@ ui::PianoRollView makePianoRollView (const timeline::Song& song, const std::stri
 
     const auto& ts = song.timeSignatures.front();
     const auto tr = [] (const char* text) { return juce::translate (text).toStdString(); };
-    view.summary = tr ("Format") + " " + std::to_string (song.format) + " · " + std::to_string (song.trackNames.size())
-                   + " " + tr ("tracks") + " · " + std::to_string (song.timeline.notes().size()) + " " + tr ("notes") + " · "
+    const auto reasonText = [&tr] (const std::string& reason) {
+        // "non-piano instrument (program N)" carries a number; the rest are fixed phrases.
+        constexpr std::string_view instrument = "non-piano instrument";
+        if (reason.starts_with (instrument))
+            return tr ("non-piano instrument") + reason.substr (instrument.size());
+        return juce::translate (juce::String::fromUTF8 (reason.c_str())).toStdString();
+    };
+    view.summary = tr ("Format") + " " + std::to_string (song.format) + " · " + tr ("tracks") + ": " + std::to_string (song.trackNames.size())
+                   + " · " + tr ("notes") + ": " + std::to_string (song.timeline.notes().size()) + " · "
                    + formatTime (song.durationSeconds) + " · "
                    + std::to_string (static_cast<int> (std::lround (song.tempoMap.tempoBpmAt (0)))) + " BPM"
                    + (song.tempoMap.changes().size() > 1 ? " (" + tr ("tempo changes") + ")" : std::string()) + " · "
@@ -163,8 +170,8 @@ ui::PianoRollView makePianoRollView (const timeline::Song& song, const std::stri
 
     for (const auto& part : song.parts)
         view.parts.push_back ({ partLabel (part),
-                                std::to_string (part.noteCount) + " " + tr (part.noteCount == 1 ? "note" : "notes") + " · " + noteName (part.lowestPitch) + "-"
-                                    + noteName (part.highestPitch) + " · " + part.reason,
+                                tr ("notes") + ": " + std::to_string (part.noteCount) + " · " + noteName (part.lowestPitch) + "-"
+                                    + noteName (part.highestPitch) + " · " + reasonText (part.reason),
                                 partRollRole (part.assignment),
                                 roleText (part.assignment),
                                 static_cast<int> (part.assignment),

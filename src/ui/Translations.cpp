@@ -282,11 +282,20 @@ constexpr Pair pairs[] = {
 
     // Song summary and audio
     { "Format", "Формат" },
-    { "tracks", "дорожек" },
-    { "notes", "нот" },
-    { "note", "нота" },
+    { "tracks", "дорожки" },
+    { "notes", "ноты" },
     { "tempo changes", "темп меняется" },
     { "No audio output device found.", "Устройство вывода звука не найдено." },
+
+    { "percussion channel 10", "ударные, канал 10" },
+    { "track name", "по названию дорожки" },
+    { "non-piano instrument", "не фортепиано" },
+    { "only piano part; split at C4", "единственная фортепианная партия; разделена по C4" },
+    { "extra piano part; hands already named", "лишняя фортепианная партия; руки уже названы" },
+    { "other hand is named", "другая рука названа" },
+    { "higher/lower average pitch", "по средней высоте нот" },
+    { "extra piano part", "лишняя фортепианная партия" },
+    { "set by you", "выбрано вами" },
 
     // Song library
     { "Song library...", "Библиотека композиций..." },
