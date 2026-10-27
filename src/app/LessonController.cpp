@@ -791,7 +791,10 @@ void LessonController::hiResTimerCallback()
     }
 
     while (const auto event = input_.pop())
+    {
+        inputTaken_.fetch_add (1, std::memory_order_relaxed);
         handleInput (*event, audio);
+    }
     if (const auto dropped = input_.takeDroppedCount(); dropped > 0)
         log_.write (LogLevel::error, "lesson", "Lesson input queue overflow", { { "dropped", std::to_string (dropped) } });
 

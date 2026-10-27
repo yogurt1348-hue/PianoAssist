@@ -39,6 +39,19 @@ struct InputMonitorView
     bool sustainDown = false;
     double eventsPerSecond = 0.0;
     unsigned long long totalNoteOns = 0;
+
+    // Input path, step by step: each counter is where an event got to.
+    std::string inputName;          ///< the input chosen or remembered
+    bool found = false;             ///< Windows lists it now
+    bool opened = false;            ///< PianoAssist has it open and started
+    bool receiving = false;         ///< events arrived in the last few seconds
+    unsigned long long callbacks = 0;      ///< messages the device callback got (all kinds)
+    unsigned long long queued = 0;         ///< note, pedal and other events queued
+    unsigned long long processed = 0;      ///< taken from the queue by the window (keyboard, monitor)
+    unsigned long long lessonProcessed = 0; ///< taken from the queue by practice (gates, timing)
+    unsigned long long overflows = 0;      ///< events lost because a queue was full
+    std::string lastEvent;          ///< raw bytes of the last message and how long ago
+    std::string openError;          ///< why opening failed, empty when it did not
 };
 
 } // namespace pianoassist::ui

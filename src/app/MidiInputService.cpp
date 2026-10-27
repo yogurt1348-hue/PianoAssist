@@ -4,6 +4,7 @@
 #include "midi_io/MidiNormalizer.h"
 
 #include <algorithm>
+#include <cstdio>
 
 namespace pianoassist::app
 {
@@ -150,11 +151,13 @@ void MidiInputService::selectByUser (const std::string& identifier)
 void MidiInputService::openDevice (const midi_io::MidiDeviceInfo& device, const char* reason)
 {
     openFailed_ = false;
+    openError_.clear();
     auto input = juce::MidiInput::openDevice (juce::String (device.identifier), this);
     if (input == nullptr)
     {
         openFailed_ = true;
         openDevice_ = device;
+        openError_ = tr ("Windows refused to open it. Another program, or a PianoAssist still closing, may be using it.");
         log_.write (LogLevel::error, "midi",
                     "Could not open MIDI input. Another program (a DAW, FL Studio, Casio app) may be using it; "
                     "close it and press Rescan.",
@@ -166,16 +169,20 @@ void MidiInputService::openDevice (const midi_io::MidiDeviceInfo& device, const 
     input_ = std::move (input);
     openDevice_ = device;
     deviceLost_ = false;
+    callbacksAtOpen_ = callbacks_.load (std::memory_order_relaxed);
+    firstEventLogged_ = false;
     remembered_ = { device.identifier, device.name };
     if (choiceListener_)
         choiceListener_ (device);
     log_.write (LogLevel::info, "midi", "MIDI input opened", { { "device", describe (device) }, { "reason", reason } });
+    logStats ("opened");
 }
 
 void MidiInputService::closeDevice (const char* reason)
 {
     if (input_ == nullptr)
         return;
+    logStats (reason);
     input_->stop();
     input_.reset();
     drainQueue();
@@ -192,15 +199,72 @@ void MidiInputService::closeDevice (const char* reason)
 
 void MidiInputService::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
 {
-    // Device thread: no allocation, locks, logging or UI calls.
+    callbacks_.fetch_add (1, std::memory_order_relaxed);
+    receive (message.getRawData(), message.getRawDataSize());
+}
+
+void MidiInputService::receive (const juce::uint8* raw, int size) noexcept
+{
+    // Device thread: no allocation, logging or UI calls; counters are relaxed
+    // atomics. The only wait is the short producer guard below, which a
+    // diagnostic test note holds for two queue pushes.
     const auto timestamp = nowMicros();
-    if (const auto event = midi_io::normalizeMidiMessage (message.getRawData(),
-                                                         static_cast<std::size_t> (message.getRawDataSize()),
-                                                         timestamp, sequence_++))
+    while (producerBusy_.test_and_set (std::memory_order_acquire))
     {
-        queue_.push (*event);
-        lessonQueue_.push (*event);
     }
+    struct Release
+    {
+        std::atomic_flag& flag;
+        ~Release() { flag.clear (std::memory_order_release); }
+    } release { producerBusy_ };
+    if (size > 0 && raw[0] != 0xf8 && raw[0] != 0xfe) // clock and active sensing would hide the notes
+    {
+        std::uint32_t packed = static_cast<std::uint32_t> (std::min (size, 3)) << 24 | static_cast<std::uint32_t> (raw[0]) << 16;
+        if (size > 1)
+            packed |= static_cast<std::uint32_t> (raw[1]) << 8;
+        if (size > 2)
+            packed |= raw[2];
+        lastRaw_.store (packed, std::memory_order_relaxed);
+        lastRawMicros_.store (timestamp, std::memory_order_relaxed);
+    }
+    if (const auto event = midi_io::normalizeMidiMessage (raw, static_cast<std::size_t> (size), timestamp, sequence_++))
+    {
+        queued_.fetch_add (1, std::memory_order_relaxed);
+        if (! queue_.push (*event))
+            overflows_.fetch_add (1, std::memory_order_relaxed);
+        if (! lessonQueue_.push (*event))
+            overflows_.fetch_add (1, std::memory_order_relaxed);
+    }
+}
+
+void MidiInputService::injectTestNote()
+{
+    log_.write (LogLevel::info, "midi", "Synthetic test note sent through the input path",
+                { { "inputOpen", input_ != nullptr ? "yes" : "no" } });
+    const juce::uint8 on[] = { 0x90, 60, 64 };
+    receive (on, 3);
+    juce::Timer::callAfterDelay (150, [this] {
+        const juce::uint8 off[] = { 0x80, 60, 0 };
+        receive (off, 3);
+    });
+}
+
+void MidiInputService::logStats (const char* why)
+{
+    const auto callbacks = callbacks_.load (std::memory_order_relaxed);
+    const auto lesson = lessonProcessed_ ? lessonProcessed_() : 0;
+    log_.write (LogLevel::info, "midi", "MIDI input path",
+                { { "why", why },
+                  { "input", openDevice_.name.empty() ? remembered_.name : openDevice_.name },
+                  { "open", input_ != nullptr ? "yes" : "no" },
+                  { "callbacks", std::to_string (callbacks) },
+                  { "queued", std::to_string (queued_.load (std::memory_order_relaxed)) },
+                  { "processedByWindow", std::to_string (processed_) },
+                  { "processedByPractice", std::to_string (lesson) },
+                  { "overflows", std::to_string (overflows_.load (std::memory_order_relaxed)) } });
+    loggedCallbacks_ = callbacks;
+    loggedLesson_ = lesson;
+    lastStatsLogMicros_ = nowMicros();
 }
 
 void MidiInputService::drainQueue()
@@ -209,7 +273,13 @@ void MidiInputService::drainQueue()
     while (const auto event = queue_.pop())
     {
         monitor_.apply (*event);
+        ++processed_;
         changed = true;
+        if (! firstEventLogged_ && input_ != nullptr)
+        {
+            firstEventLogged_ = true;
+            log_.write (LogLevel::info, "midi", "First event received from the open input", { { "device", describe (openDevice_) } });
+        }
 
         switch (event->type)
         {
@@ -245,6 +315,33 @@ void MidiInputService::drainQueue()
         lastOtherLogMicros_ = now;
     }
 
+    // Practice takes its own copy of each event; if it stops taking them,
+    // the keyboard still lights but nothing is judged. Say so once.
+    if (lessonProcessed_)
+    {
+        const auto queued = queued_.load (std::memory_order_relaxed);
+        const auto lesson = lessonProcessed_();
+        if (lesson < queued && lesson == lessonSeenProcessed_)
+        {
+            if (lessonBehindSinceMicros_ == 0)
+                lessonBehindSinceMicros_ = now;
+            else if (! lessonStallLogged_ && now - lessonBehindSinceMicros_ > 2'000'000)
+            {
+                lessonStallLogged_ = true;
+                log_.write (LogLevel::error, "midi", "Practice is not taking input events",
+                            { { "queued", std::to_string (queued) }, { "processedByPractice", std::to_string (lesson) } });
+            }
+        }
+        else
+        {
+            lessonBehindSinceMicros_ = 0;
+            lessonStallLogged_ = false;
+        }
+        lessonSeenProcessed_ = lesson;
+    }
+    if (callbacks_.load (std::memory_order_relaxed) != loggedCallbacks_ && now - lastStatsLogMicros_ >= 10'000'000)
+        logStats ("periodic");
+
     if (changed)
         publishView();
 }
@@ -254,6 +351,10 @@ void MidiInputService::timerCallback()
     drainQueue();
     if (++ticks_ % rescanEveryTicks == 0)
     {
+        // A refused open is tried again every few seconds: the other program may have let go.
+        if (input_ == nullptr && openFailed_ && ticks_ % (rescanEveryTicks * 5) == 0)
+            if (const auto it = std::find (devices_.begin(), devices_.end(), openDevice_); it != devices_.end())
+                openDevice (*it, "retry after refused open");
         rescan ("poll");
         publishView(); // refresh the event-rate readout
     }
@@ -311,6 +412,28 @@ void MidiInputService::publishView()
     view.sustainDown = monitor_.sustainDown();
     view.eventsPerSecond = monitor_.eventsPerSecond (nowMicros());
     view.totalNoteOns = monitor_.counters().noteOns;
+
+    view.inputName = ! openDevice_.name.empty() ? openDevice_.name : remembered_.name;
+    view.found = std::any_of (devices_.begin(), devices_.end(), [&] (const auto& d) {
+        return (input_ != nullptr || openFailed_) ? d == openDevice_ : d.name == remembered_.name;
+    });
+    view.opened = input_ != nullptr;
+    view.callbacks = callbacks_.load (std::memory_order_relaxed);
+    view.queued = queued_.load (std::memory_order_relaxed);
+    view.processed = processed_;
+    view.lessonProcessed = lessonProcessed_ ? lessonProcessed_() : 0;
+    view.overflows = overflows_.load (std::memory_order_relaxed);
+    view.openError = openError_;
+    if (const auto packed = lastRaw_.load (std::memory_order_relaxed); packed != 0)
+    {
+        const auto size = static_cast<int> (packed >> 24);
+        char text[32];
+        std::snprintf (text, sizeof (text), size >= 3 ? "%02X %02X %02X" : size == 2 ? "%02X %02X" : "%02X",
+                       (packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff);
+        const auto ago = (nowMicros() - lastRawMicros_.load (std::memory_order_relaxed)) / 1'000'000;
+        view.lastEvent = std::string (text) + "  (" + std::to_string (ago) + " s)";
+        view.receiving = ago < 5 && view.callbacks > callbacksAtOpen_;
+    }
 
     viewListener_ (view);
 }

@@ -456,6 +456,27 @@ constexpr Pair pairs[] = {
     { "You play about", "Вы играете примерно на" },
     { "ms after every note. The sound probably reaches you late: Settings > MIDI and audio > Measure delay.",
       "мс позже каждой ноты. Похоже, звук доходит до вас с задержкой: Настройки > MIDI и аудио > «Измерить задержку»." },
+
+    // Input path diagnostics
+    { "Input path", "Путь MIDI-ввода" },
+    { "Test the input path", "Проверить путь ввода" },
+    { "Sends one C4 note through the same queues as the piano. If it shows up here but your keys do not, the piano's events do not reach PianoAssist.",
+      "Отправляет одну ноту C4 через те же очереди, что и пианино. Если она здесь появилась, а ваши клавиши нет, события пианино не доходят до PianoAssist." },
+    { "no input chosen", "вход не выбран" },
+    { "found", "найден" },
+    { "not found", "не найден" },
+    { "open", "открыт" },
+    { "not open", "не открыт" },
+    { "events arriving", "события поступают" },
+    { "no events in the last 5 s", "событий не было 5 с" },
+    { "Received by the device callback", "Получено callback устройства" },
+    { "queued", "в очереди" },
+    { "taken by the window", "обработано окном" },
+    { "taken by practice", "обработано практикой" },
+    { "lost (queue full)", "потеряно (очередь полна)" },
+    { "Last message", "Последнее сообщение" },
+    { "Windows refused to open it. Another program, or a PianoAssist still closing, may be using it.",
+      "Windows не дал открыть вход. Его может занимать другая программа или ещё не закрывшийся PianoAssist." },
 };
 
 juce::String escape (const char* text)

@@ -54,6 +54,7 @@ public:
     struct Intents
     {
         std::function<void (const std::string& identifier)> selectInput;
+        std::function<void()> testInputPath; ///< a synthetic note through the real input path
         std::function<void()> startLatencyTest;
         std::function<void()> stopLatencyTest;
         std::function<void()> rescanInputs;

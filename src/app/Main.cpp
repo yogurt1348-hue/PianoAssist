@@ -452,6 +452,7 @@ private:
         settings_.practiceProfile = lesson::profileFor (lesson::toleranceOf (settings_.practiceProfile));
         lesson_ = std::make_unique<LessonController> (*log_, *audio_, midi_->lessonQueue(), settings_.practiceProfile,
                                                       settings_.calibration.inputOffsetMs);
+        midi_->setLessonProcessedSource ([this] { return lesson_ != nullptr ? lesson_->inputTaken() : 0; });
         instruments_ = std::make_unique<InstrumentService> (*log_, *audio_, settings_.sound, [this] { saveSettings(); });
         instruments_->onChange = [this] { showSound(); };
         instruments_->onTrackSoundsChanged = [this] {
@@ -585,6 +586,7 @@ private:
     {
         ui::SettingsComponent::Intents i;
         i.selectInput = [this] (const std::string& id) { midi_->selectByUser (id); };
+        i.testInputPath = [this] { midi_->injectTestNote(); };
         i.rescanInputs = [this] {
             log_->write (LogLevel::info, "ui", "User pressed Rescan");
             midi_->rescan ("user rescan");
@@ -1361,6 +1363,7 @@ private:
 
     std::string diagnosticReport (std::size_t logLines)
     {
+        midi_->logPath ("report");
         diagnostics::DiagnosticSummary s;
         s.appVersion = versionText() + (isPortable() ? " portable" : "");
 #if JUCE_DEBUG

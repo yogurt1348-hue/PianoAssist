@@ -9,6 +9,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <atomic>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -109,8 +110,11 @@ public:
     void stopLatencyTest();
 
     PracticeSnapshot snapshot() const;
+    /** Input events taken from the queue so far (any thread). */
+    std::uint64_t inputTaken() const noexcept { return inputTaken_.load (std::memory_order_relaxed); }
 
 private:
+    std::atomic<std::uint64_t> inputTaken_ { 0 };
     struct LoadSong { std::shared_ptr<const timeline::Song> song; bool keepPosition; };
     struct PlayPause {};
     struct Stop {};

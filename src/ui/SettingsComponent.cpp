@@ -546,6 +546,18 @@ public:
             values_[i].setFont (juce::FontOptions (18.0f, juce::Font::bold));
             addAndMakeVisible (values_[i]);
         }
+        addHeading (pathHeading_, TRANS ("Input path"));
+        pathState_.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        addAndMakeVisible (pathState_);
+        pathCounters_.setFont (juce::FontOptions (13.0f));
+        pathCounters_.setMinimumHorizontalScale (1.0f);
+        pathCounters_.setJustificationType (juce::Justification::topLeft);
+        addAndMakeVisible (pathCounters_);
+        testInput_.setButtonText (TRANS ("Test the input path"));
+        testInput_.setTooltip (TRANS ("Sends one C4 note through the same queues as the piano. If it shows up here but your keys do not, "
+                                      "the piano's events do not reach PianoAssist."));
+        testInput_.onClick = [this] { if (intents_.testInputPath) intents_.testInputPath(); };
+        addAndMakeVisible (testInput_);
         addHeading (systemHeading_, TRANS ("This installation"));
         info_.setMultiLine (true);
         info_.setReadOnly (true);
@@ -576,6 +588,23 @@ public:
         values_[2].setText (v.sustainDown ? TRANS ("Down") : TRANS ("Up"), juce::dontSendNotification);
         values_[3].setText (juce::String (v.eventsPerSecond, 0), juce::dontSendNotification);
         values_[4].setText (juce::String (static_cast<juce::int64> (v.totalNoteOns)), juce::dontSendNotification);
+
+        // Found, open and receiving are separate steps: each can fail on its own.
+        const auto name = v.inputName.empty() ? TRANS ("no input chosen") : toJuce (v.inputName);
+        juce::String state = name + ":  " + (v.found ? TRANS ("found") : TRANS ("not found")) + "  ·  "
+                             + (v.opened ? TRANS ("open") : TRANS ("not open")) + "  ·  "
+                             + (v.receiving ? TRANS ("events arriving") : TRANS ("no events in the last 5 s"));
+        if (v.openError.size() > 0)
+            state << "\n" << toJuce (v.openError);
+        pathState_.setText (state, juce::dontSendNotification);
+        pathState_.setColour (juce::Label::textColourId, v.opened && v.receiving ? theme::good : v.opened ? theme::text : theme::warning);
+        const auto n = [] (unsigned long long value) { return juce::String (static_cast<juce::int64> (value)); };
+        pathCounters_.setText (TRANS ("Received by the device callback") + ": " + n (v.callbacks) + "   ·   " + TRANS ("queued") + ": "
+                                   + n (v.queued) + "\n" + TRANS ("taken by the window") + ": " + n (v.processed) + "   ·   "
+                                   + TRANS ("taken by practice") + ": " + n (v.lessonProcessed) + "   ·   " + TRANS ("lost (queue full)")
+                                   + ": " + n (v.overflows) + "\n" + TRANS ("Last message") + ": "
+                                   + (v.lastEvent.empty() ? juce::String ("-") : toJuce (v.lastEvent)),
+                               juce::dontSendNotification);
     }
 
     void setValues (const Values& v)
@@ -601,6 +630,12 @@ public:
             captions_[i].setBounds (captions.removeFromLeft (w));
             values_[i].setBounds (values.removeFromLeft (w));
         }
+        pathHeading_.setBounds (r.take (26, 4));
+        auto stateRow = r.take (40, 2);
+        testInput_.setBounds (stateRow.removeFromRight (std::min (220, stateRow.getWidth() / 3)).withHeight (30));
+        stateRow.removeFromRight (8);
+        pathState_.setBounds (stateRow);
+        pathCounters_.setBounds (r.take (52, 10));
         systemHeading_.setBounds (r.take (26, 4));
         info_.setBounds (r.take (86, 10));
         auto row = r.take (30);
@@ -618,7 +653,8 @@ public:
 
 private:
     Intents& intents_;
-    juce::Label monitorHeading_, systemHeading_, privacy_;
+    juce::Label monitorHeading_, systemHeading_, privacy_, pathHeading_, pathState_, pathCounters_;
+    juce::TextButton testInput_;
     std::array<juce::Label, 5> captions_, values_;
     juce::TextEditor info_;
     juce::TextButton copy_, save_, logs_, data_, updates_;
