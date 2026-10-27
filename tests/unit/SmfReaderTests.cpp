@@ -195,3 +195,23 @@ TEST_CASE ("Bar lines follow tempo changes")
     CHECK (bars[1] == Approx (2.0));
     CHECK (song.durationSeconds == Approx (6.0));
 }
+
+TEST_CASE ("Running status continues after a meta event, as many sequencers write it")
+{
+    const std::vector<std::uint8_t> bytes {
+        'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1, 0x01, 0xE0,
+        'M', 'T', 'r', 'k', 0, 0, 0, 23,
+        0x00, 0x90, 60, 80,             // note on C4
+        0x00, 0xFF, 0x01, 0x01, 'x',    // text meta event
+        0x00, 62, 80,                   // running status note on D4
+        0x83, 0x60, 60, 0,              // running status: C4 off at 480
+        0x00, 62, 0,                    // D4 off
+        0x00, 0xFF, 0x2F, 0x00 };
+    auto file = readSmf (bytes);
+    INFO (file.error());
+    REQUIRE (file.isOk());
+    REQUIRE (file.value().notes.size() == 2);
+    CHECK (file.value().notes[1].pitch == 62);
+    CHECK (file.value().notes[1].endTick == 480);
+    CHECK (file.value().repairs.empty());
+}

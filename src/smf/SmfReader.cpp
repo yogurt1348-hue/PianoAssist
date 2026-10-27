@@ -57,7 +57,8 @@ public:
 
             if (*status == 0xFF)
             {
-                runningStatus = 0;
+                // The specification cancels running status here, but many
+                // sequencers keep using it after a meta event; keep it.
                 const auto type = reader.readU8();
                 const auto length = reader.readVariableLength();
                 if (! type || ! length)
