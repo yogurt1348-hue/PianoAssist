@@ -455,6 +455,8 @@ void InstrumentService::closeEditor()
     {
         log_.write (LogLevel::info, "sound", "Plug-in window closed");
         editorWindow_.reset();
+        if (editorPart_ == -1)
+            saveState(); // the main instrument's settings, right away
         if (editorPart_ >= 0 && onTrackSoundsChanged)
             onTrackSoundsChanged(); // the track's plug-in state may have changed
     }
@@ -570,8 +572,9 @@ void InstrumentService::setSong (std::vector<int> channels, std::vector<TrackSou
         slot.choice.kind = "main";
         if (i < sounds.size() && ! sounds[i].choice.kind.empty())
             slot.choice = sounds[i].choice;
-        if (slot.choice.kind != "main")
-            realise (slot, i < sounds.size() ? &sounds[i].state : nullptr, channels_[i] == drumChannel);
+        if (slot.choice.kind != "main" && ! realise (slot, i < sounds.size() ? &sounds[i].state : nullptr, channels_[i] == drumChannel)
+            && i < sounds.size())
+            slot.keptState = sounds[i].state;
     }
     applyRouting();
     releaseUnusedSoundFonts();
@@ -585,6 +588,7 @@ void InstrumentService::choosePart (std::size_t part, int soundId)
         return;
     auto& slot = parts_[part];
     release (slot);
+    slot.keptState.reset();
     slot.choice = choiceFor (soundId);
     realise (slot, nullptr, channels_[part] == drumChannel);
     applyRouting();
@@ -612,8 +616,12 @@ std::vector<InstrumentService::TrackSound> InstrumentService::trackSounds() cons
         TrackSound sound;
         sound.choice = slot.choice;
         if (slot.ownsHandle)
+        {
             if (auto* renderer = dynamic_cast<audio::PluginInstrumentRenderer*> (audio_.instrument (slot.handle)))
                 renderer->plugin().getStateInformation (sound.state);
+        }
+        else if (slot.choice.kind == "plugin")
+            sound.state = slot.keptState; // not loaded now: keep what was saved
         sounds.push_back (std::move (sound));
     }
     return sounds;

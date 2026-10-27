@@ -75,6 +75,9 @@ private:
         int handle = AudioService::builtInHandle; ///< what actually plays
         bool ownsHandle = false;                   ///< a plug-in instance of its own
         std::string problem;
+        /** The saved plug-in state of a choice that could not load (plug-in
+            missing or failing). Kept so saving the song does not lose it. */
+        juce::MemoryBlock keptState;
     };
 
     void instruments (std::vector<juce::PluginDescription>& out) const;

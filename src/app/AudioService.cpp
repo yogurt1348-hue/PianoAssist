@@ -182,9 +182,11 @@ int AudioService::addInstrument (std::unique_ptr<audio::IInstrumentRenderer> ins
 {
     if (! instrument)
         return builtInHandle;
+    // Prepared under the lock: a device restart (new sample rate) either
+    // happens before and is read here, or after and re-prepares it.
+    std::scoped_lock lock (instrumentsMutex_);
     const auto [rate, block] = renderFormat();
     instrument->prepare (rate, block);
-    std::scoped_lock lock (instrumentsMutex_);
     const int handle = nextHandle_++;
     owned_.emplace (handle, std::move (instrument));
     return handle;

@@ -69,8 +69,11 @@ void PluginInstrumentRenderer::render (std::span<const ScheduledMidiEvent> event
             midi_.addEvent (juce::MidiMessage::controllerEvent (channel, 64, 0), 0);
             midi_.addEvent (juce::MidiMessage::allNotesOff (channel), 0);
         }
+    int added = 0;
     for (const auto& e : events)
     {
+        if (++added > maxEventsPerBlock)
+            break; // the buffer was reserved for this many; never allocate here
         const int kind = e.status & 0xF0;
         if (! sendDrums_ && (e.status & 0x0F) == drumChannel && (kind == 0x80 || kind == 0x90))
             continue;
