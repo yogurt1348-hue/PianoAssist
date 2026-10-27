@@ -3,6 +3,9 @@
 #include "core/NoteName.h"
 #include "lesson_engine/Gate.h"
 
+#include <algorithm>
+#include <unordered_map>
+
 namespace pianoassist::app
 {
 namespace
@@ -13,6 +16,34 @@ using audio::PlaybackState;
 constexpr int tickMs = 2;
 constexpr std::int64_t wrongFlashMicros = 400'000;
 constexpr double accompanimentOnlyAfterSeconds = 1.5;
+constexpr std::size_t upcomingGateCount = 3;
+
+std::vector<GateHands> splitByHand (const timeline::Timeline& timeline, const std::vector<lesson::Gate>& gates)
+{
+    std::unordered_map<timeline::NoteId, const timeline::Note*> byId;
+    for (const auto& note : timeline.notes())
+        byId.emplace (note.id, &note);
+
+    std::vector<GateHands> hands;
+    hands.reserve (gates.size());
+    for (const auto& gate : gates)
+    {
+        GateHands h;
+        for (const auto id : gate.noteIds)
+        {
+            const auto it = byId.find (id);
+            if (it == byId.end())
+                continue;
+            auto& list = it->second->role == timeline::NoteRole::leftHand ? h.left : h.right;
+            if (std::find (list.begin(), list.end(), it->second->pitch) == list.end())
+                list.push_back (it->second->pitch);
+        }
+        std::sort (h.right.begin(), h.right.end());
+        std::sort (h.left.begin(), h.left.end());
+        hands.push_back (std::move (h));
+    }
+    return hands;
+}
 
 std::string names (const std::vector<std::uint8_t>& pitches)
 {
@@ -63,6 +94,8 @@ void LessonController::seek (double s) { post (Seek { s }); }
 void LessonController::silence() { post (Silence {}); }
 void LessonController::setPractising (bool on) { post (SetPractising { on }); }
 void LessonController::setMode (lesson::PracticeMode mode) { post (SetMode { mode }); }
+void LessonController::setProfile (lesson::PracticeProfile profile) { post (SetProfile { std::move (profile) }); }
+void LessonController::previewKey (std::uint8_t pitch, bool down) { post (PreviewKey { pitch, down }); }
 
 PracticeSnapshot LessonController::snapshot() const
 {
@@ -93,6 +126,7 @@ void LessonController::rebuild (double position, const char* why)
     if (practising_)
     {
         session_.emplace (lesson::buildGates (song_->timeline, mode_), profile_);
+        hands_ = splitByHand (song_->timeline, session_->gates());
         log_.write (LogLevel::info, "lesson", "Practice prepared",
                     { { "reason", why }, { "mode", std::string (lesson::toString (mode_)) },
                       { "gates", std::to_string (session_->gates().size()) } });
@@ -100,6 +134,7 @@ void LessonController::rebuild (double position, const char* why)
     else
     {
         session_.reset();
+        hands_.clear();
     }
     resetGates (position);
 }
@@ -181,6 +216,29 @@ void LessonController::handle (const Intent& intent)
                 audio_.stop();
                 rebuild (audio.positionSeconds, "mode changed");
             }
+            else if constexpr (std::is_same_v<T, SetProfile>)
+            {
+                if (profile_ == i.profile)
+                    return;
+                profile_ = i.profile;
+                log_.write (LogLevel::info, "lesson", "Tolerance changed",
+                            { { "name", profile_.name },
+                              { "earlyMs", juce::String (profile_.onsetEarlyMs, 0).toStdString() },
+                              { "lateMs", juce::String (profile_.onsetLateMs, 0).toStdString() } });
+                if (session_)
+                {
+                    // Keep playing: only the windows change, from the current note on.
+                    const auto position = audio.positionSeconds;
+                    session_.emplace (lesson::buildGates (song_->timeline, mode_), profile_);
+                    resetGates (position);
+                }
+            }
+            else if constexpr (std::is_same_v<T, PreviewKey>)
+            {
+                log_.write (LogLevel::debug, "ui", i.down ? "On-screen key down" : "On-screen key up",
+                            { { "note", noteName (i.pitch) } });
+                audio_.previewKey (i.pitch, i.down);
+            }
         },
         intent);
 }
@@ -193,12 +251,12 @@ void LessonController::handleInput (const midi_io::InputEvent& event, const Audi
         return; // gates only judge presses while the song runs or waits
 
     // Map the press to song time. While held at a gate, song time is frozen
-    // at the onset; the wall time since arrival measures lateness.
+    // at the boundary; the wall time since arrival measures lateness.
     const auto offset = inputOffsetMs_ / 1000.0;
+    const auto boundary = session_->nextBoundarySeconds();
     double songTime = 0.0;
-    if (audio.state == PlaybackState::waitingForGate && session_->currentGate() != nullptr)
-        songTime = session_->currentGate()->onsetSeconds
-                   + static_cast<double> (event.timestampMicros - audio.arrivalMicros) / 1.0e6 - offset;
+    if (audio.state == PlaybackState::waitingForGate && boundary)
+        songTime = *boundary + static_cast<double> (event.timestampMicros - audio.arrivalMicros) / 1.0e6 - offset;
     else
         songTime = audio.blockStartPosition + static_cast<double> (event.timestampMicros - audio.blockStartMicros) / 1.0e6 - offset;
 
@@ -232,6 +290,7 @@ void LessonController::publish (const AudioService::Snapshot& audio)
 
     PracticeSnapshot snap;
     snap.practising = practising_;
+    snap.tolerance = lesson::toleranceOf (profile_);
     snap.mode = mode_;
     snap.waiting = audio.state == PlaybackState::waitingForGate;
     snap.lastVerdict = lastVerdict_;
@@ -244,6 +303,12 @@ void LessonController::publish (const AudioService::Snapshot& audio)
         {
             snap.gateNumber = gate->index + 1;
             snap.missing = session_->missingPitches();
+            if (gate->index < hands_.size())
+            {
+                snap.current = hands_[gate->index];
+                for (std::size_t k = gate->index + 1; k < hands_.size() && snap.upcoming.size() < upcomingGateCount; ++k)
+                    snap.upcoming.push_back (hands_[k]);
+            }
             snap.matched = session_->matchedPitches();
             snap.accompanimentOnly = audio.state == PlaybackState::playing
                                      && gate->onsetSeconds - audio.positionSeconds > accompanimentOnlyAfterSeconds;

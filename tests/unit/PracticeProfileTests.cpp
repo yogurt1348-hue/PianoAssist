@@ -7,14 +7,32 @@
 
 using namespace pianoassist;
 
-TEST_CASE ("Default practice profile matches the documented tolerance")
+TEST_CASE ("Default practice profile is the Normal tolerance")
 {
     const lesson::PracticeProfile profile;
-    CHECK (profile.onsetEarlyMs == 120.0);
-    CHECK (profile.onsetLateMs == 180.0);
+    CHECK (profile == lesson::profileFor (lesson::Tolerance::normal));
+    CHECK (profile.onsetEarlyMs == 250.0);
+    CHECK (profile.onsetLateMs == 300.0);
     CHECK (profile.ignoreVelocity);
     CHECK (profile.requireExactPitch);
     CHECK (lesson::validate (profile).empty());
+}
+
+TEST_CASE ("Tolerance presets round-trip through their names")
+{
+    using lesson::Tolerance;
+    for (const auto t : { Tolerance::strict, Tolerance::normal, Tolerance::easy })
+    {
+        const auto profile = lesson::profileFor (t);
+        CHECK (lesson::toleranceOf (profile) == t);
+        CHECK (lesson::validate (profile).empty());
+    }
+    CHECK (lesson::profileFor (Tolerance::strict).onsetEarlyMs == 120.0);
+    CHECK (lesson::profileFor (Tolerance::easy).onsetLateMs == 600.0);
+
+    lesson::PracticeProfile old;
+    old.name = "Default"; // written by builds before the presets existed
+    CHECK (lesson::toleranceOf (old) == Tolerance::normal);
 }
 
 TEST_CASE ("Practice profile validation rejects unusable windows")

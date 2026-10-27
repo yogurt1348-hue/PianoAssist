@@ -47,6 +47,7 @@ public:
         played by the learner). Stops playback and returns to 0. */
     void loadSong (const timeline::Song& song, const std::function<bool (timeline::NoteRole)>& include);
     void setGate (double boundarySeconds); ///< negative clears
+    void previewKey (std::uint8_t pitch, bool down);
     void play();
     void pause();
     void stop();

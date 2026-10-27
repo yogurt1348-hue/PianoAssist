@@ -66,6 +66,12 @@ void AudioService::setGate (double boundarySeconds)
     send ({ audio::PlaybackCommand::Type::setGate, boundarySeconds }, "gate");
 }
 
+void AudioService::previewKey (std::uint8_t pitch, bool down)
+{
+    const double value = static_cast<double> (pitch) + 1.0;
+    send ({ audio::PlaybackCommand::Type::preview, down ? value : -value }, "preview");
+}
+
 void AudioService::loadSong (const timeline::Song& song, const std::function<bool (timeline::NoteRole)>& include)
 {
     std::scoped_lock lock (listsMutex_);

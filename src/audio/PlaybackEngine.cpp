@@ -136,6 +136,15 @@ void PlaybackEngine::handle (const PlaybackCommand& command, IInstrumentRenderer
         case Type::setGain:
             break; // applied by the audio callback owner
 
+        case Type::preview:
+        {
+            const auto pitch = static_cast<std::uint8_t> (std::clamp (std::abs (command.value) - 1.0, 0.0, 127.0));
+            const bool on = command.value > 0.0;
+            queueEvent ({ 0, static_cast<std::uint8_t> ((on ? 0x90u : 0x80u) | PlaybackCommand::previewChannel), pitch,
+                          static_cast<std::uint8_t> (on ? 90 : 64) });
+            break;
+        }
+
         case Type::setGate:
             gateSeconds_ = command.value;
             if (state_ == PlaybackState::waitingForGate

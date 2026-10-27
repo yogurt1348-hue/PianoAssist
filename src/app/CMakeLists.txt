@@ -14,7 +14,8 @@ target_sources(PianoAssistApp PRIVATE
     ${PROJECT_SOURCE_DIR}/src/audio/InternalSynthRenderer.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/MainComponent.cpp
     ${PROJECT_SOURCE_DIR}/src/ui/PianoRollComponent.cpp
-    ${PROJECT_SOURCE_DIR}/src/ui/KeyboardStrip.cpp)
+    ${PROJECT_SOURCE_DIR}/src/ui/KeyboardStrip.cpp
+    ${PROJECT_SOURCE_DIR}/src/ui/NextNotesBoard.cpp)
 
 target_compile_definitions(PianoAssistApp PRIVATE
     JUCE_WEB_BROWSER=0

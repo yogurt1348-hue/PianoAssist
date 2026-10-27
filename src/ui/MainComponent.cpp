@@ -125,16 +125,23 @@ MainComponent::MainComponent (Intents intents)
     modeBox_.setSelectedId (1, juce::dontSendNotification);
     modeBox_.setTooltip ("Which hand you play. The app plays everything else.");
     modeBox_.onChange = [this] { if (intents_.modeChanged) intents_.modeChanged (modeBox_.getSelectedId() - 1); };
-    waitingLabel_.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+    toleranceBox_.addItem ("Strict timing", 1);
+    toleranceBox_.addItem ("Normal timing", 2);
+    toleranceBox_.addItem ("Easy timing", 3);
+    toleranceBox_.setSelectedId (2, juce::dontSendNotification);
+    toleranceBox_.setTooltip ("How early or late a note may be played and still count. Strict: 120 ms early / 180 ms late. "
+                              "Normal: 250 / 300 ms. Easy: 400 / 600 ms. Within the window the song keeps going.");
+    toleranceBox_.onChange = [this] { if (intents_.toleranceChanged) intents_.toleranceChanged (toleranceBox_.getSelectedId() - 1); };
     gateLabel_.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
     gateLabel_.setJustificationType (juce::Justification::centredRight);
-    for (auto* c : std::initializer_list<juce::Component*> { &practiceToggle_, &modeBox_, &waitingLabel_, &gateLabel_ })
+    for (auto* c : std::initializer_list<juce::Component*> { &practiceToggle_, &modeBox_, &toleranceBox_, &gateLabel_, &board_ })
         addAndMakeVisible (c);
     setWantsKeyboardFocus (true);
 
     roll_.onZoomChanged = [this] (double pps) { if (intents_.zoomChanged) intents_.zoomChanged (pps); };
     roll_.onSeekRequested = [this] (double seconds) { if (intents_.seek) intents_.seek (seconds); };
     addAndMakeVisible (roll_);
+    keyboard_.onKey = [this] (std::uint8_t pitch, bool down) { if (intents_.keyClicked) intents_.keyClicked (pitch, down); };
     addAndMakeVisible (keyboard_);
     emptyHint_.toFront (false);
 
@@ -177,26 +184,8 @@ void MainComponent::setPractice (const PracticeView& view)
     modeBox_.setSelectedId (view.mode + 1, juce::dontSendNotification);
     keyboard_.setPracticePitches (view.practising ? view.required : std::vector<std::uint8_t> {}, view.wrong);
 
-    juce::String text;
-    juce::Colour colour = juce::Colours::white;
-    if (view.practising && song_)
-    {
-        if (view.waiting)
-        {
-            text = "Waiting for: " + toJuce (view.requiredText);
-            colour = juce::Colour (0xfff2c94c);
-        }
-        else if (view.gateCount == 0)
-            text = "This hand has no notes in the song";
-        else if (view.gateNumber == 0)
-            text = "All your notes played";
-        else if (view.accompanimentOnly)
-            text = "Accompaniment only";
-        else
-            text = "Next: " + toJuce (view.requiredText);
-    }
-    waitingLabel_.setText (text, juce::dontSendNotification);
-    waitingLabel_.setColour (juce::Label::textColourId, colour);
+    toleranceBox_.setSelectedId (view.tolerance + 1, juce::dontSendNotification);
+    board_.setView (view);
     gateLabel_.setText (view.practising && view.gateCount > 0
                             ? "Step " + juce::String (static_cast<int> (view.gateNumber == 0 ? view.gateCount : view.gateNumber))
                                   + " of " + juce::String (static_cast<int> (view.gateCount))
@@ -389,11 +378,13 @@ void MainComponent::resized()
     practiceBar.removeFromLeft (6);
     modeBox_.setBounds (practiceBar.removeFromLeft (130));
     practiceBar.removeFromLeft (12);
+    toleranceBox_.setBounds (practiceBar.removeFromLeft (140));
     gateLabel_.setBounds (practiceBar.removeFromRight (200));
-    waitingLabel_.setBounds (practiceBar);
 
     area.removeFromTop (6);
-    keyboard_.setBounds (area.removeFromBottom (64));
+    keyboard_.setBounds (area.removeFromBottom (84));
+    area.removeFromBottom (6);
+    board_.setBounds (area.removeFromBottom (92));
     area.removeFromBottom (6);
 
     if (song_)

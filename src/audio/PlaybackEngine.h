@@ -35,7 +35,11 @@ struct PlaybackCommand
         silence,   ///< panic: release and reset voices now
         setGain,   ///< value = linear gain
         setGate,   ///< value = boundary seconds, negative = no gate; releases a hold when moved past it
+        preview,   ///< value = pitch + 1 for note-on, -(pitch + 1) for note-off; independent of the song
     };
+
+    /** MIDI channel (0-based) for previewed keys, kept apart from song notes. */
+    static constexpr std::uint8_t previewChannel = 15;
 
     Type type = Type::stop;
     double value = 0.0;

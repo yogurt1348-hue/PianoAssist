@@ -37,8 +37,9 @@ struct PressResult
     song seconds; the caller maps input timestamps to song time and tells
     the session when the transport reached the gate boundary.
 
-    While the transport waits at a gate, song time is frozen at the onset,
-    so the caller passes the onset plus the wall time since arrival; such
+    While the transport waits at a gate, song time is frozen at the
+    boundary, so the caller passes the boundary plus the wall time since
+    arrival; such
     presses are still accepted (the gate waits for them) and are classed
     late once beyond the late window. */
 class PracticeSession
@@ -54,6 +55,8 @@ public:
 
     const std::vector<Gate>& gates() const noexcept { return gates_; }
     const Gate* currentGate() const noexcept;
+    /** Where the transport holds if the current gate is not played: the end
+        of its late window. Within the window the song keeps going. */
     std::optional<double> nextBoundarySeconds() const noexcept;
 
     /** Pitches of the current gate not matched yet, sorted. */

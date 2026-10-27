@@ -57,7 +57,7 @@ std::optional<double> PracticeSession::nextBoundarySeconds() const noexcept
 {
     if (finished())
         return std::nullopt;
-    return gates_[current_].onsetSeconds;
+    return gates_[current_].onsetSeconds + profile_.onsetLateMs / 1000.0;
 }
 
 std::vector<std::uint8_t> PracticeSession::missingPitches() const

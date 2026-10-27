@@ -201,3 +201,33 @@ TEST_CASE ("Commands before a song is loaded are ignored")
     CHECK (engine.state() == PlaybackState::stopped);
     CHECK (renderer.recorded.empty());
 }
+
+TEST_CASE ("Previewed keys sound on their own channel, with or without a song")
+{
+    struct Recorder final : audio::IInstrumentRenderer
+    {
+        void prepare (double, int) override {}
+        void render (std::span<const audio::ScheduledMidiEvent> events, audio::RenderBlock) noexcept override
+        {
+            seen.insert (seen.end(), events.begin(), events.end());
+        }
+        void allNotesOff() noexcept override {}
+        void silence() noexcept override {}
+        int reportedLatencyFrames() const noexcept override { return 0; }
+        std::vector<audio::ScheduledMidiEvent> seen;
+    } renderer;
+
+    audio::PlaybackEngine engine;
+    engine.prepare (48000.0);
+    engine.handle ({ audio::PlaybackCommand::Type::preview, 61.0 }, renderer); // C4 down
+    engine.process (renderer, { nullptr, 2, 256 });
+    engine.handle ({ audio::PlaybackCommand::Type::preview, -61.0 }, renderer); // C4 up
+    engine.process (renderer, { nullptr, 2, 256 });
+
+    REQUIRE (renderer.seen.size() == 2);
+    CHECK (renderer.seen[0].status == (0x90 | audio::PlaybackCommand::previewChannel));
+    CHECK (renderer.seen[0].data1 == 60);
+    CHECK (renderer.seen[1].status == (0x80 | audio::PlaybackCommand::previewChannel));
+    CHECK (renderer.seen[1].data1 == 60);
+    CHECK (engine.state() == audio::PlaybackState::stopped);
+}

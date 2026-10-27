@@ -12,6 +12,27 @@ bool inWindowRange (double ms)
 }
 } // namespace
 
+PracticeProfile profileFor (Tolerance tolerance)
+{
+    PracticeProfile profile;
+    switch (tolerance)
+    {
+        case Tolerance::strict: profile.name = "Strict"; profile.onsetEarlyMs = 120.0; profile.onsetLateMs = 180.0; break;
+        case Tolerance::normal: break;
+        case Tolerance::easy:   profile.name = "Easy";   profile.onsetEarlyMs = 400.0; profile.onsetLateMs = 600.0; break;
+    }
+    return profile;
+}
+
+Tolerance toleranceOf (const PracticeProfile& profile)
+{
+    if (profile.name == "Strict")
+        return Tolerance::strict;
+    if (profile.name == "Easy")
+        return Tolerance::easy;
+    return Tolerance::normal;
+}
+
 std::vector<std::string> validate (const PracticeProfile& profile)
 {
     std::vector<std::string> problems;

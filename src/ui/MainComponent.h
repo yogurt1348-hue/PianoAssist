@@ -2,6 +2,7 @@
 
 #include "ui/InputMonitorView.h"
 #include "ui/KeyboardStrip.h"
+#include "ui/NextNotesBoard.h"
 #include "ui/PianoRollComponent.h"
 #include "ui/PianoRollView.h"
 #include "ui/PracticeView.h"
@@ -37,6 +38,8 @@ public:
         std::function<void (float gain)> volumeChanged;
         std::function<void (bool practising)> practiceChanged;
         std::function<void (int mode)> modeChanged;
+        std::function<void (int tolerance)> toleranceChanged;
+        std::function<void (std::uint8_t pitch, bool down)> keyClicked;
     };
 
     explicit MainComponent (Intents intents);
@@ -98,8 +101,9 @@ private:
 
     juce::ToggleButton practiceToggle_ { "Practice: wait for my notes" };
     juce::ComboBox modeBox_;
-    juce::Label waitingLabel_;
+    juce::ComboBox toleranceBox_;
     juce::Label gateLabel_;
+    NextNotesBoard board_;
 
     PianoRollComponent roll_;
     KeyboardStrip keyboard_;

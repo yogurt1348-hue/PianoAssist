@@ -18,6 +18,12 @@ using Catch::Approx;
 
 namespace
 {
+// The table-driven cases below are written for the 120/180 ms windows.
+const lesson::PracticeProfile strict = lesson::profileFor (lesson::Tolerance::strict);
+} // namespace
+
+namespace
+{
 Note note (timeline::NoteId id, std::uint8_t pitch, double start, NoteRole role, double length = 0.4)
 {
     Note n;
@@ -110,7 +116,7 @@ TEST_CASE ("Single-note gate: timing classification")
                              Case { 2.181, PressVerdict::acceptedLate, true },    // just outside: still waits, late
                              Case { 9.000, PressVerdict::acceptedLate, true });
 
-    PracticeSession session (gates, {});
+    PracticeSession session (gates, strict);
     session.resetTo (0.0);
     const auto result = session.press (60, c.pressAt);
     CHECK (result.verdict == c.verdict);
@@ -124,7 +130,7 @@ TEST_CASE ("Chords pass in any order; wrong notes never pass or reset")
     std::vector<std::uint8_t> order { 60, 64, 67 };
     do
     {
-        PracticeSession session (gates, {});
+        PracticeSession session (gates, strict);
         session.resetTo (0.0);
         CHECK (session.press (61, 1.0).verdict == PressVerdict::wrongPitch);
         CHECK_FALSE (session.press (order[0], 1.0).gatePassed);
@@ -143,7 +149,7 @@ TEST_CASE ("A required pitch matches once per multiplicity")
     keep.collapseUnisonDuplicates = false;
     const auto timeline = makeTimeline ({ note (0, 60, 1.0, NoteRole::rightHand), note (1, 60, 1.0, NoteRole::leftHand),
                                           note (2, 64, 1.0, NoteRole::rightHand) });
-    PracticeSession session (buildGates (timeline, PracticeMode::bothHands, keep), {});
+    PracticeSession session (buildGates (timeline, PracticeMode::bothHands, keep), strict);
     session.resetTo (0.0);
     CHECK (session.press (60, 1.0).verdict == PressVerdict::acceptedOnTime);
     CHECK (session.press (64, 1.0).verdict == PressVerdict::acceptedOnTime);
@@ -155,7 +161,7 @@ TEST_CASE ("Rapid repeated pitch: each gate needs its own press")
 {
     const auto timeline = makeTimeline ({ note (0, 60, 1.0, NoteRole::rightHand, 0.1), note (1, 60, 1.125, NoteRole::rightHand, 0.1),
                                           note (2, 60, 1.25, NoteRole::rightHand, 0.1) });
-    PracticeSession session (buildGates (timeline, PracticeMode::rightHand), {});
+    PracticeSession session (buildGates (timeline, PracticeMode::rightHand), strict);
     session.resetTo (0.0);
     CHECK (session.press (60, 1.0).gatePassed);
     CHECK (session.press (60, 1.0).verdict == PressVerdict::tooEarly);        // 125 ms before the second
@@ -170,7 +176,7 @@ TEST_CASE ("Already-matched presses carry into a close next gate")
     // Gate A at 1.0 (C4), gate B at 1.08 (C4 again): one press while waiting at A
     // passes A; a second press 50 ms later is early for B and is accepted.
     const auto timeline = makeTimeline ({ note (0, 60, 1.0, NoteRole::rightHand, 0.05), note (1, 62, 1.08, NoteRole::rightHand, 0.05) });
-    PracticeSession session (buildGates (timeline, PracticeMode::rightHand), {});
+    PracticeSession session (buildGates (timeline, PracticeMode::rightHand), strict);
     session.resetTo (0.0);
     CHECK (session.press (62, 1.0).verdict == PressVerdict::wrongPitch); // D early, before C
     CHECK (session.press (60, 1.01).gatePassed);                         // C passes A, D carries into B
@@ -181,7 +187,7 @@ TEST_CASE ("Already-matched presses carry into a close next gate")
 TEST_CASE ("Seeking resets the current gate and drops partial matches")
 {
     const auto gates = buildGates (song(), PracticeMode::bothHands);
-    PracticeSession session (gates, {});
+    PracticeSession session (gates, strict);
     session.resetTo (0.0);
     session.press (60, 1.0);
     session.resetTo (1.0); // seek exactly onto the chord
@@ -236,7 +242,7 @@ Run practise (int blockSize, double sampleRate, double reactionSeconds)
             list.events.push_back ({ n.endSeconds, 0x80, n.pitch, 64 });
         }
 
-    PracticeSession session (buildGates (timeline, PracticeMode::rightHand), {});
+    PracticeSession session (buildGates (timeline, PracticeMode::rightHand), strict);
     session.resetTo (0.0);
 
     audio::PlaybackEngine engine;
@@ -263,10 +269,10 @@ Run practise (int blockSize, double sampleRate, double reactionSeconds)
         if (heldSince >= 0 && engine.state() == audio::PlaybackState::waitingForGate
             && static_cast<double> (frame - heldSince) / sampleRate >= reactionSeconds)
         {
-            const auto onset = session.currentGate()->onsetSeconds;
+            const auto boundary = *session.nextBoundarySeconds();
             run.holdFrames.push_back (frame - heldSince);
             for (const auto pitch : session.missingPitches())
-                session.press (pitch, onset + reactionSeconds);
+                session.press (pitch, boundary + reactionSeconds);
             const auto next = session.nextBoundarySeconds();
             engine.handle ({ audio::PlaybackCommand::Type::setGate, next ? *next : -1.0 }, renderer);
             heldSince = -1;
@@ -286,9 +292,10 @@ TEST_CASE ("Practice transport holds exactly at each gate for any buffer size")
     const auto run = practise (blockSize, sampleRate, 0.5);
 
     REQUIRE (run.holdPositions.size() == 3);
-    CHECK (run.holdPositions[0] == Approx (1.0));
-    CHECK (run.holdPositions[1] == Approx (2.0));
-    CHECK (run.holdPositions[2] == Approx (4.0)); // backing at 3 s played through
+    // Holds at the end of each late window (onset + 180 ms), not at the onset.
+    CHECK (run.holdPositions[0] == Approx (1.18));
+    CHECK (run.holdPositions[1] == Approx (2.18));
+    CHECK (run.holdPositions[2] == Approx (4.18)); // backing at 3 s played through
     CHECK (run.passed == 3);
     CHECK (run.noteOns == 1);                     // the backing note, once
     CHECK (run.finalState == audio::PlaybackState::completed);
@@ -313,7 +320,7 @@ TEST_CASE ("A gate passed before the transport reaches it causes no hold")
     list.id = 1;
     list.durationSeconds = 2.0;
 
-    PracticeSession session (buildGates (timeline, PracticeMode::rightHand), {});
+    PracticeSession session (buildGates (timeline, PracticeMode::rightHand), strict);
     session.resetTo (0.0);
     audio::PlaybackEngine engine;
     NullRenderer renderer;

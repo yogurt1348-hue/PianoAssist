@@ -17,9 +17,19 @@
 namespace pianoassist::app
 {
 
+/** The pitches of one gate, split by the hand that plays them. */
+struct GateHands
+{
+    std::vector<std::uint8_t> right;
+    std::vector<std::uint8_t> left;
+};
+
 /** What the practice part of the window shows. */
 struct PracticeSnapshot
 {
+    lesson::Tolerance tolerance = lesson::Tolerance::normal;
+    GateHands current;                      ///< the gate to play now
+    std::vector<GateHands> upcoming;        ///< the next few gates after it
     bool practising = false;
     lesson::PracticeMode mode = lesson::PracticeMode::bothHands;
     bool waiting = false;                   ///< transport held at a gate
@@ -53,6 +63,8 @@ public:
     void silence();
     void setPractising (bool practising);
     void setMode (lesson::PracticeMode mode);
+    void setProfile (lesson::PracticeProfile profile);
+    void previewKey (std::uint8_t pitch, bool down); ///< a click on the on-screen keyboard
 
     PracticeSnapshot snapshot() const;
 
@@ -64,7 +76,9 @@ private:
     struct Silence {};
     struct SetPractising { bool on; };
     struct SetMode { lesson::PracticeMode mode; };
-    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode>;
+    struct SetProfile { lesson::PracticeProfile profile; };
+    struct PreviewKey { std::uint8_t pitch; bool down; };
+    using Intent = std::variant<LoadSong, PlayPause, Stop, Seek, Silence, SetPractising, SetMode, SetProfile, PreviewKey>;
 
     void post (Intent intent);
     void hiResTimerCallback() override;
@@ -90,6 +104,7 @@ private:
     bool practising_ = false;
     lesson::PracticeMode mode_ = lesson::PracticeMode::bothHands;
     std::optional<lesson::PracticeSession> session_;
+    std::vector<GateHands> hands_; ///< parallel to the session's gates
     std::uint64_t seenArrivals_ = 0;
     std::int64_t waitStartedMicros_ = 0;
     audio::PlaybackState lastState_ = audio::PlaybackState::stopped;

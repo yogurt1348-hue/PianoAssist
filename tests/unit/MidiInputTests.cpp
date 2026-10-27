@@ -205,6 +205,9 @@ TEST_CASE ("Note names use MIDI 60 = C4")
     CHECK (noteName (60) == "C4");
     CHECK (noteName (61) == "C#4");
     CHECK (noteName (21) == "A0");
+    CHECK (solfegeName (60) == "до");
+    CHECK (solfegeName (67) == "соль");
+    CHECK (solfegeName (70) == "ля#");
     CHECK (noteName (108) == "C8");
     CHECK (noteName (0) == "C-1");
     CHECK (noteName (128) == "?");

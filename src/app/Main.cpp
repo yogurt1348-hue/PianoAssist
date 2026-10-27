@@ -3,7 +3,6 @@
 #include "app/LessonController.h"
 #include "app/MidiInputService.h"
 #include "app/SongLoader.h"
-#include "core/NoteName.h"
 #include "core/Utf8Path.h"
 #include "diagnostics/RotatingLog.h"
 #include "diagnostics/SessionReport.h"
@@ -13,6 +12,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <algorithm>
 #include <exception>
 #include <memory>
 
@@ -214,6 +214,12 @@ public:
             [this] (float gain) { audio_->setGain (gain); },
             [this] (bool practising) { lesson_->setPractising (practising); },
             [this] (int mode) { lesson_->setMode (toPracticeMode (mode)); },
+            [this] (int tolerance) {
+                settings_.practiceProfile = lesson::profileFor (static_cast<lesson::Tolerance> (std::clamp (tolerance, 0, 2)));
+                lesson_->setProfile (settings_.practiceProfile);
+                saveSettings();
+            },
+            [this] (std::uint8_t pitch, bool down) { lesson_->previewKey (pitch, down); },
         });
         content_ = content;
         content->setPixelsPerSecond (settings_.visual.pixelsPerSecond);
@@ -227,6 +233,8 @@ public:
 
         audio_ = std::make_unique<AudioService> (*log_);
         audioError_ = audio_->start();
+        // Profiles are chosen as presets; an older or edited file maps to one.
+        settings_.practiceProfile = lesson::profileFor (lesson::toleranceOf (settings_.practiceProfile));
         lesson_ = std::make_unique<LessonController> (*log_, *audio_, midi_->lessonQueue(), settings_.practiceProfile,
                                                       settings_.calibration.inputOffsetMs);
         lesson_->start();
@@ -337,14 +345,16 @@ private:
         pv.practising = practice.practising;
         pv.mode = static_cast<int> (practice.mode);
         pv.waiting = practice.waiting;
+        pv.tolerance = static_cast<int> (practice.tolerance);
         pv.accompanimentOnly = practice.accompanimentOnly;
+        pv.current = { practice.current.right, practice.current.left };
+        for (const auto& step : practice.upcoming)
+            pv.upcoming.push_back ({ step.right, step.left });
         pv.required = practice.missing;
         pv.matched = practice.matched;
         pv.wrong = practice.recentWrong;
         pv.gateNumber = practice.gateNumber;
         pv.gateCount = practice.gateCount;
-        for (const auto pitch : practice.missing)
-            pv.requiredText += (pv.requiredText.empty() ? "" : " ") + noteName (pitch);
         content_->setPractice (pv);
     }
 
@@ -353,10 +363,18 @@ private:
         if (settings_.midiInput.deviceId == device.identifier && settings_.midiInput.lastSeenName == device.name)
             return;
         settings_.midiInput = { device.identifier, device.name };
-        if (const auto error = settings::saveToFile (settingsFile(), settings_); ! error.empty())
-            log_->write (LogLevel::error, "settings", error);
-        else
+        if (saveSettings())
             log_->write (LogLevel::info, "settings", "Remembered MIDI input", { { "device", device.name } });
+    }
+
+    bool saveSettings()
+    {
+        if (const auto error = settings::saveToFile (settingsFile(), settings_); ! error.empty())
+        {
+            log_->write (LogLevel::error, "settings", error);
+            return false;
+        }
+        return true;
     }
 
     std::unique_ptr<diagnostics::RotatingLog> log_;
